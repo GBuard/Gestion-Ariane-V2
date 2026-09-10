@@ -43,24 +43,33 @@ export default function Calendrier() {
 
     const events = useMemo(
         () =>
-            (data || []).map((e) => ({
-                id: e.id,
-                title: [
-                    e.formationTitle,
-                    e.salleName ? `· ${e.salleName}` : null,
-                ]
-                    .filter(Boolean)
-                    .join(" "),
-                start: e.startDate,
-                end: e.endDate,
-                backgroundColor: e.formationColor || "#3B82F6",
-                borderColor: e.formationColor || "#3B82F6",
-                extendedProps: {
-                    count: e.inscriptionCount,
-                    max: e.maxCapacity,
-                    notes: e.notes,
-                },
-            })),
+            (data || []).map((e) => {
+                const absent = Boolean(e.trainerAbsent);
+                const color = absent
+                    ? "#9CA3AF"
+                    : e.formationColor || "#3B82F6";
+                return {
+                    id: e.id,
+                    title: [
+                        absent ? "[Absent]" : null,
+                        e.formationTitle,
+                        e.salleName ? `· ${e.salleName}` : null,
+                    ]
+                        .filter(Boolean)
+                        .join(" "),
+                    start: e.startDate,
+                    end: e.endDate,
+                    backgroundColor: color,
+                    borderColor: color,
+                    classNames: absent ? ["fc-event-trainer-absent"] : [],
+                    extendedProps: {
+                        count: e.inscriptionCount,
+                        max: e.maxCapacity,
+                        notes: e.notes,
+                        trainerAbsent: absent,
+                    },
+                };
+            }),
         [data],
     );
 
@@ -159,15 +168,24 @@ export default function Calendrier() {
                         navigate(`/seances/${info.event.id}`);
                     }}
                     eventContent={(arg) => (
-                        <div className="fc-event-main-frame text-left leading-tight py-0.5">
+                        <div
+                            className={[
+                                "fc-event-main-frame text-left leading-tight py-0.5",
+                                arg.event.extendedProps.trainerAbsent
+                                    ? "opacity-70"
+                                    : "",
+                            ].join(" ")}
+                        >
                             <div className="font-medium text-xs truncate">
                                 {arg.event.title}
                             </div>
                             <div className="text-[10px] opacity-90">
-                                {countLabel(
-                                    arg.event.extendedProps.count,
-                                    arg.event.extendedProps.max,
-                                )}
+                                {arg.event.extendedProps.trainerAbsent
+                                    ? "Formateur absent"
+                                    : countLabel(
+                                          arg.event.extendedProps.count,
+                                          arg.event.extendedProps.max,
+                                      )}
                             </div>
                             <button
                                 type="button"

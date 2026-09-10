@@ -22,16 +22,30 @@ export default function Login() {
     } = useForm({ resolver: zodResolver(schema) });
 
     if (user) {
-        return <Navigate to="/dashboard" replace />;
+        return <Navigate to="/calendrier" replace />;
     }
 
     const onSubmit = async (values) => {
         setApiError("");
         try {
             await login(values.email, values.password);
-            navigate("/dashboard", { replace: true });
-        } catch {
-            setApiError("Email ou mot de passe incorrect.");
+            navigate("/calendrier", { replace: true });
+        } catch (err) {
+            const status = err?.response?.status;
+            const serverMsg = err?.response?.data?.message;
+            const code = err?.code;
+            let msg =
+                serverMsg ||
+                (code === "ERR_NETWORK" || err?.message === "Network Error"
+                    ? "Impossible de joindre l’API. Vérifiez que le front a été buildé avec VITE_API_URL=https://api… (F12 → Réseau) et que le certificat / le DNS sont corrects."
+                    : null);
+            if (!msg && status === 401) {
+                msg = "Email ou mot de passe incorrect.";
+            }
+            if (!msg && status >= 500) {
+                msg = "Erreur serveur. Consultez les logs PM2 sur le VPS.";
+            }
+            setApiError(msg || "Connexion impossible. Ouvrez la console (F12) pour plus de détails.");
         }
     };
 

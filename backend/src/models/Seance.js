@@ -25,6 +25,8 @@ const seanceSchema = new mongoose.Schema(
             },
         },
         notes: { type: String, default: "" },
+        /** Formateur absent : séance grisée, salle libérée pour chevauchement. */
+        trainerAbsent: { type: Boolean, default: false },
         isArchived: { type: Boolean, default: false },
     },
     { timestamps: true },

@@ -33,6 +33,9 @@ function firstIsoWeekdayOnOrAfterDateStr(startStr, weekday) {
     throw new Error("Impossible de trouver le jour demandé dans la période");
 }
 
+
+
+
 function eachDateStrInRangeInclusive(startStr, endStr) {
     const out = [];
     let cur = fromZonedTime(`${startStr}T12:00:00`, TZ);

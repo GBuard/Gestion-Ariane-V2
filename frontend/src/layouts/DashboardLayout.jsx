@@ -1,4 +1,5 @@
-import { NavLink, Outlet } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useAuth } from "../context/AuthContext.jsx";
 import { isAdmin } from "../utils/roles.js";
 
@@ -10,8 +11,36 @@ const navCls = ({ isActive }) =>
             : "text-slate-300 hover:bg-slate-800/60 hover:text-white",
     ].join(" ");
 
+const adminSubCls = ({ isActive }) =>
+    [
+        "block rounded-md px-3 py-1.5 text-sm transition",
+        isActive
+            ? "bg-slate-800 text-white"
+            : "text-slate-400 hover:bg-slate-800/60 hover:text-white",
+    ].join(" ");
+
+const ADMIN_PATHS = [
+    "/salles",
+    "/statistiques",
+    "/utilisateurs",
+    "/historique",
+];
+
 export function DashboardLayout() {
     const { user, logout } = useAuth();
+    const location = useLocation();
+    const admin = isAdmin(user);
+    const adminSectionActive = ADMIN_PATHS.some(
+        (p) =>
+            location.pathname === p || location.pathname.startsWith(`${p}/`),
+    );
+    const [adminOpen, setAdminOpen] = useState(adminSectionActive);
+
+    useEffect(() => {
+        if (adminSectionActive) {
+            setAdminOpen(true);
+        }
+    }, [adminSectionActive]);
 
     return (
         <div className="min-h-screen flex bg-slate-100">
@@ -25,34 +54,73 @@ export function DashboardLayout() {
                     </div>
                 </div>
                 <nav className="p-3 flex flex-col gap-0.5 flex-1">
-                    <NavLink to="/dashboard" className={navCls}>
-                        Tableau de bord
+                    <NavLink to="/calendrier" className={navCls}>
+                        Calendrier
                     </NavLink>
                     <NavLink to="/beneficiaires" className={navCls}>
-                        Bénéficiaires
-                    </NavLink>
-                    <NavLink to="/formations" className={navCls}>
-                        Formations
-                    </NavLink>
-                    <NavLink to="/salles" className={navCls}>
-                        Salles
+                        Liste Bénéficiaires
                     </NavLink>
                     <NavLink to="/seances" className={navCls}>
                         Séances
                     </NavLink>
-                    <NavLink to="/calendrier" className={navCls}>
-                        Calendrier
+                    <NavLink to="/formations" className={navCls}>
+                        Formations
                     </NavLink>
-                    <NavLink to="/historique" className={navCls}>
-                        Archives
-                    </NavLink>
-                    <NavLink to="/statistiques" className={navCls}>
-                        Statistiques
-                    </NavLink>
-                    {isAdmin(user) ? (
-                        <NavLink to="/utilisateurs" className={navCls}>
-                            Utilisateurs
-                        </NavLink>
+
+                    <div
+                        className="my-3 border-t border-slate-700"
+                        role="separator"
+                    />
+
+                    <button
+                        type="button"
+                        onClick={() => setAdminOpen((o) => !o)}
+                        className={[
+                            "w-full flex items-center justify-between rounded-md px-3 py-2 text-sm font-medium transition text-left",
+                            adminSectionActive
+                                ? "bg-slate-800/80 text-white"
+                                : "text-slate-300 hover:bg-slate-800/60 hover:text-white",
+                        ].join(" ")}
+                        aria-expanded={adminOpen}
+                    >
+                        <span>Administration</span>
+                        <span
+                            className={[
+                                "text-xs text-slate-400 transition-transform",
+                                adminOpen ? "rotate-180" : "",
+                            ].join(" ")}
+                            aria-hidden
+                        >
+                            ▼
+                        </span>
+                    </button>
+
+                    {adminOpen ? (
+                        <div className="ml-2 mt-0.5 flex flex-col gap-0.5 border-l border-slate-700 pl-2">
+                            <NavLink to="/salles" className={adminSubCls}>
+                                Salles
+                            </NavLink>
+                            <NavLink
+                                to="/statistiques"
+                                className={adminSubCls}
+                            >
+                                Statistiques
+                            </NavLink>
+                            {admin ? (
+                                <NavLink
+                                    to="/utilisateurs"
+                                    className={adminSubCls}
+                                >
+                                    Utilisateurs
+                                </NavLink>
+                            ) : null}
+                            <NavLink
+                                to="/historique"
+                                className={adminSubCls}
+                            >
+                                Archives
+                            </NavLink>
+                        </div>
                     ) : null}
                 </nav>
                 <div className="p-3 border-t border-slate-800">

@@ -3,7 +3,6 @@ import { ProtectedRoute } from "./components/ProtectedRoute.jsx";
 import { AdminRoute } from "./components/AdminRoute.jsx";
 import { DashboardLayout } from "./layouts/DashboardLayout.jsx";
 import Login from "./pages/Login.jsx";
-import Dashboard from "./pages/Dashboard.jsx";
 import Beneficiaires from "./pages/Beneficiaires.jsx";
 import Formations from "./pages/Formations.jsx";
 import Salles from "./pages/Salles.jsx";
@@ -25,8 +24,11 @@ export default function App() {
                     </ProtectedRoute>
                 }
             >
-                <Route path="/" element={<Navigate to="/dashboard" replace />} />
-                <Route path="/dashboard" element={<Dashboard />} />
+                <Route path="/" element={<Navigate to="/calendrier" replace />} />
+                <Route
+                    path="/dashboard"
+                    element={<Navigate to="/calendrier" replace />}
+                />
                 <Route path="/beneficiaires" element={<Beneficiaires />} />
                 <Route path="/formations" element={<Formations />} />
                 <Route path="/salles" element={<Salles />} />
@@ -44,7 +46,7 @@ export default function App() {
                     }
                 />
             </Route>
-            <Route path="*" element={<Navigate to="/dashboard" replace />} />
+            <Route path="*" element={<Navigate to="/calendrier" replace />} />
         </Routes>
     );
 }

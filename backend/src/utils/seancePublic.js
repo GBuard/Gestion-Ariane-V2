@@ -7,6 +7,7 @@ export function seancePublic(doc) {
         endDate: doc.endDate?.toISOString?.() ?? doc.endDate,
         capacity: doc.capacity ?? null,
         notes: doc.notes ?? "",
+        trainerAbsent: Boolean(doc.trainerAbsent),
         isArchived: doc.isArchived,
         createdAt: doc.createdAt,
         updatedAt: doc.updatedAt,

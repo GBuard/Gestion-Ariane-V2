@@ -4,9 +4,15 @@ import { Beneficiaire } from "../models/Beneficiaire.js";
 import { Formation } from "../models/Formation.js";
 import { Seance } from "../models/Seance.js";
 import { Salle } from "../models/Salle.js";
+import { User } from "../models/User.js";
 import { inscriptionPublic } from "../utils/inscriptionPublic.js";
 import { seancePublic } from "../utils/seancePublic.js";
 import { mergeInscriptionsForSeance } from "../utils/seanceInscriptionsMerge.js";
+
+function normalizeMessage(raw) {
+    if (raw === undefined || raw === null) return "";
+    return String(raw).trim().slice(0, 1000);
+}
 
 async function beneficiaireIdsForReferent(userId) {
     const rows = await Beneficiaire.find({
@@ -154,8 +160,25 @@ export async function listBySeance(req, res) {
     const bens = await Beneficiaire.find({ _id: { $in: benIds } }).lean();
     const bMap = new Map(bens.map((b) => [b._id.toString(), b]));
 
+    const refIds = [
+        ...new Set(
+            bens
+                .map((b) => b.referentId?.toString?.())
+                .filter(Boolean),
+        ),
+    ];
+    const refs = refIds.length
+        ? await User.find({ _id: { $in: refIds } })
+              .select("firstName lastName")
+              .lean()
+        : [];
+    const refMap = new Map(refs.map((u) => [u._id.toString(), u]));
+
     const inscriptions = merged.map((row) => {
         const b = bMap.get(row.beneficiaireId.toString());
+        const ref = b?.referentId
+            ? refMap.get(b.referentId.toString())
+            : null;
         return {
             ...inscriptionPublic(row),
             beneficiaire: b
@@ -164,6 +187,9 @@ export async function listBySeance(req, res) {
                       firstName: b.firstName,
                       lastName: b.lastName,
                       referentId: b.referentId.toString(),
+                      referentName: ref
+                          ? `${ref.firstName} ${ref.lastName}`
+                          : null,
                   }
                 : null,
         };
@@ -172,6 +198,7 @@ export async function listBySeance(req, res) {
     res.json({
         seance: seancePublic(seance),
         formationTitle: formation.title,
+        formationTrainerId: formation.trainerId.toString(),
         salleName: salle?.name || "",
         inscriptions,
     });
@@ -208,6 +235,7 @@ export async function createInscriptionsBulk(req, res) {
         allSeances,
         nextSeancesCount: nextSeancesCountRaw,
         status,
+        message: messageRaw,
     } = req.body;
     const seanceId = normalizeSeanceId(seanceRaw);
     const nextSeancesCount =
@@ -216,6 +244,7 @@ export async function createInscriptionsBulk(req, res) {
         nextSeancesCountRaw !== ""
             ? Number(nextSeancesCountRaw)
             : NaN;
+    const message = normalizeMessage(messageRaw);
 
     const b = await Beneficiaire.findById(beneficiaireId);
     if (!b || b.isArchived) {
@@ -269,6 +298,7 @@ export async function createInscriptionsBulk(req, res) {
                     formationId,
                     seanceId: s._id,
                     status: st,
+                    message,
                 });
                 created.push(inscriptionPublic(x));
             } catch (err) {
@@ -306,6 +336,7 @@ export async function createInscriptionsBulk(req, res) {
                     formationId,
                     seanceId: s._id,
                     status: st,
+                    message,
                 });
                 created.push(inscriptionPublic(x));
             } catch (err) {
@@ -350,6 +381,7 @@ export async function createInscriptionsBulk(req, res) {
             formationId,
             seanceId,
             status: st,
+            message,
         });
         return res.status(201).json({
             created: [inscriptionPublic(x)],
@@ -368,9 +400,15 @@ export async function createInscriptionsBulk(req, res) {
 }
 
 export async function createInscription(req, res) {
-    const { beneficiaireId, formationId, seanceId: seanceRaw, status } =
-        req.body;
+    const {
+        beneficiaireId,
+        formationId,
+        seanceId: seanceRaw,
+        status,
+        message: messageRaw,
+    } = req.body;
     const seanceId = normalizeSeanceId(seanceRaw);
+    const message = normalizeMessage(messageRaw);
 
     const b = await Beneficiaire.findById(beneficiaireId);
     if (!b || b.isArchived) {
@@ -409,6 +447,7 @@ export async function createInscription(req, res) {
             formationId,
             seanceId,
             status: status || "inscrit",
+            message,
         });
         res.status(201).json({ inscription: inscriptionPublic(x) });
     } catch (err) {
@@ -524,4 +563,100 @@ export async function deleteInscription(req, res) {
 
     await Inscription.findByIdAndDelete(id);
     res.status(204).send();
+}
+
+/**
+ * Retire un bénéficiaire d’une séance précise.
+ * - Inscription liée au créneau : suppression.
+ * - Inscription « toute la formation » : convertit en inscriptions sur les autres
+ *   séances actives (hors celle-ci), puis supprime l’inscription globale.
+ */
+export async function removeFromSeance(req, res) {
+    const { id } = req.params;
+    const { seanceId } = req.body;
+
+    if (!mongoose.isValidObjectId(id) || !mongoose.isValidObjectId(seanceId)) {
+        return res.status(400).json({ message: "Identifiant invalide" });
+    }
+
+    const ins = await Inscription.findById(id);
+    if (!ins) {
+        return res.status(404).json({ message: "Inscription introuvable" });
+    }
+
+    const seance = await Seance.findById(seanceId);
+    if (!seance) {
+        return res.status(404).json({ message: "Séance introuvable" });
+    }
+
+    if (ins.formationId.toString() !== seance.formationId.toString()) {
+        return res.status(400).json({
+            message: "L’inscription ne correspond pas à cette séance",
+        });
+    }
+
+    if (req.user.role === "referent") {
+        const b = await Beneficiaire.findById(ins.beneficiaireId);
+        if (
+            !b ||
+            b.referentId.toString() !== req.user._id.toString()
+        ) {
+            return res.status(403).json({ message: "Accès refusé" });
+        }
+    } else if (req.user.role === "formateur") {
+        return res.status(403).json({ message: "Accès refusé" });
+    }
+
+    if (
+        ins.seanceId != null &&
+        ins.seanceId.toString() === seanceId
+    ) {
+        await Inscription.findByIdAndDelete(id);
+        return res.json({
+            removed: true,
+            mode: "specific",
+            createdOnOtherSeances: 0,
+        });
+    }
+
+    if (ins.seanceId != null) {
+        return res.status(400).json({
+            message: "Cette inscription ne concerne pas cette séance",
+        });
+    }
+
+    const others = await Seance.find({
+        formationId: seance.formationId,
+        isArchived: false,
+        trainerAbsent: { $ne: true },
+        _id: { $ne: seance._id },
+    })
+        .select("_id")
+        .lean();
+
+    let createdOnOtherSeances = 0;
+    const statusKeep =
+        ins.status && ins.status !== "annule" ? ins.status : "inscrit";
+
+    for (const s of others) {
+        try {
+            await Inscription.create({
+                beneficiaireId: ins.beneficiaireId,
+                formationId: ins.formationId,
+                seanceId: s._id,
+                status: statusKeep,
+                message: ins.message || "",
+            });
+            createdOnOtherSeances += 1;
+        } catch (err) {
+            if (err.code !== 11000) throw err;
+        }
+    }
+
+    await Inscription.findByIdAndDelete(id);
+    res.json({
+        removed: true,
+        mode: "formation_wide",
+        createdOnOtherSeances,
+    });
 }

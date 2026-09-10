@@ -1,3 +1,6 @@
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
 import mongoose from "mongoose";
 import { Seance } from "../models/Seance.js";
 import { Formation } from "../models/Formation.js";
@@ -11,6 +14,22 @@ import { assertSeanceParisSchedule } from "../utils/seanceScheduleParis.js";
 import { assertNoRoomOverlap } from "../utils/seanceRoomOverlap.js";
 import { applyFormateurSeanceScope } from "../utils/seanceScope.js";
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const EMARGEMENT_LOGO_PATH = path.join(
+    __dirname,
+    "../../assets/emargement/emargement ariane.png",
+);
+
+function loadEmargementLogoDataUri() {
+    try {
+        if (!fs.existsSync(EMARGEMENT_LOGO_PATH)) return null;
+        const buf = fs.readFileSync(EMARGEMENT_LOGO_PATH);
+        return `data:image/png;base64,${buf.toString("base64")}`;
+    } catch {
+        return null;
+    }
+}
+
 function parseDates(startRaw, endRaw) {
     const startDate = new Date(startRaw);
     const endDate = new Date(endRaw);
@@ -20,7 +39,9 @@ function parseDates(startRaw, endRaw) {
         throw err;
     }
     if (endDate <= startDate) {
-        const err = new Error("La date de fin doit être après la date de début");
+        const err = new Error(
+            "La date de fin doit être après la date de début",
+        );
         err.statusCode = 400;
         throw err;
     }
@@ -51,7 +72,8 @@ function escapeRegex(s) {
 
 export async function listSeances(req, res) {
     const includeArchived =
-        req.query.includeArchived === "true" || req.query.includeArchived === "1";
+        req.query.includeArchived === "true" ||
+        req.query.includeArchived === "1";
     const filter = {};
 
     if (req.user.role === "admin") {
@@ -227,6 +249,11 @@ export async function getSeanceFeuilleEmargement(req, res) {
         )
         .join("");
 
+    const logoDataUri = loadEmargementLogoDataUri();
+    const logoHtml = logoDataUri
+        ? `<div class="logo-header"><img src="${logoDataUri}" alt="Ariane Méditerranée" /></div>`
+        : "";
+
     const html = `<!DOCTYPE html>
 <html lang="fr">
 <head>
@@ -235,16 +262,22 @@ export async function getSeanceFeuilleEmargement(req, res) {
 <title>Feuille d'émargement</title>
 <style>
   body { font-family: system-ui, sans-serif; margin: 24px; color: #111; }
+  .logo-header { margin: 0 0 16px; max-width: 800px; }
+  .logo-header img { display: block; max-width: 100%; max-height: 72px; width: auto; height: auto; object-fit: contain; }
   h1 { font-size: 1.25rem; margin: 0 0 8px; color: #1e40af; }
   .meta { margin: 8px 0 16px; line-height: 1.6; }
   table { border-collapse: collapse; width: 100%; max-width: 800px; }
   th, td { border: 1px solid #333; padding: 10px; text-align: left; }
   th { background: #f3f4f6; }
   .muted { color: #6b7280; font-size: 0.9rem; }
-  @media print { .no-print { display: none; } }
+  @media print {
+    .no-print { display: none; }
+    .logo-header img { max-height: 150px; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  }
 </style>
 </head>
 <body>
+${logoHtml}
 <p class="muted">DIRE — Feuille d'émargement atelier</p>
 <h1>${escapeHtml(formation.title)}</h1>
 <div class="meta">
@@ -305,10 +338,7 @@ export async function createSeance(req, res) {
         salleId,
         startDate: dates.startDate,
         endDate: dates.endDate,
-        capacity:
-            capacity != null && capacity !== ""
-                ? Number(capacity)
-                : null,
+        capacity: capacity != null && capacity !== "" ? Number(capacity) : null,
         notes: notes != null ? String(notes) : "",
         isArchived: false,
     });
@@ -371,9 +401,7 @@ export async function updateSeance(req, res) {
 
     if (capacity !== undefined) {
         x.capacity =
-            capacity === null || capacity === ""
-                ? null
-                : Number(capacity);
+            capacity === null || capacity === "" ? null : Number(capacity);
     }
     if (notes !== undefined) x.notes = String(notes);
     if (isArchived !== undefined) x.isArchived = Boolean(isArchived);
@@ -429,11 +457,124 @@ export async function destroySeancePermanent(req, res) {
 }
 
 /**
+ * Marque / démarque l’absence formateur.
+ * Si reportBeneficiaires=true à l’activation : reporte les inscrits (créneau précis)
+ * vers la prochaine séance non absente de la formation.
+ */
+export async function setTrainerAbsent(req, res) {
+    const { id } = req.params;
+    if (!mongoose.isValidObjectId(id)) {
+        return res.status(400).json({ message: "Identifiant invalide" });
+    }
+
+    const seance = await Seance.findById(id);
+    if (!seance) {
+        return res.status(404).json({ message: "Séance introuvable" });
+    }
+    if (seance.isArchived) {
+        return res.status(400).json({
+            message: "Impossible de modifier une séance archivée",
+        });
+    }
+
+    const formation = await Formation.findById(seance.formationId);
+    if (!formation || formation.isArchived) {
+        return res.status(404).json({ message: "Formation introuvable" });
+    }
+
+    if (req.user.role === "formateur") {
+        if (formation.trainerId.toString() !== req.user._id.toString()) {
+            return res.status(403).json({ message: "Accès refusé" });
+        }
+    } else if (req.user.role !== "admin") {
+        return res.status(403).json({ message: "Accès refusé" });
+    }
+
+    const trainerAbsent = Boolean(req.body.trainerAbsent);
+    const reportBeneficiaires = Boolean(req.body.reportBeneficiaires);
+
+    let reportedCount = 0;
+    let skippedAlreadyOnNext = 0;
+    let nextSeanceId = null;
+    let nextSeanceStart = null;
+    let noNextSeance = false;
+
+    if (trainerAbsent && reportBeneficiaires) {
+        const next = await Seance.findOne({
+            formationId: seance.formationId,
+            isArchived: false,
+            trainerAbsent: { $ne: true },
+            startDate: { $gt: seance.startDate },
+            _id: { $ne: seance._id },
+        })
+            .sort({ startDate: 1 })
+            .lean();
+
+        if (!next) {
+            noNextSeance = true;
+        } else {
+            nextSeanceId = next._id.toString();
+            nextSeanceStart = next.startDate.toISOString();
+
+            const specific = await Inscription.find({
+                formationId: seance.formationId,
+                seanceId: seance._id,
+                status: { $ne: "annule" },
+            });
+
+            for (const ins of specific) {
+                const exists = await Inscription.findOne({
+                    beneficiaireId: ins.beneficiaireId,
+                    formationId: ins.formationId,
+                    seanceId: next._id,
+                });
+                if (exists) {
+                    skippedAlreadyOnNext += 1;
+                } else {
+                    try {
+                        await Inscription.create({
+                            beneficiaireId: ins.beneficiaireId,
+                            formationId: ins.formationId,
+                            seanceId: next._id,
+                            status: "inscrit",
+                            message: ins.message || "",
+                        });
+                        reportedCount += 1;
+                    } catch (err) {
+                        if (err.code === 11000) {
+                            skippedAlreadyOnNext += 1;
+                        } else {
+                            throw err;
+                        }
+                    }
+                }
+                ins.status = "annule";
+                await ins.save();
+            }
+        }
+    }
+
+    seance.trainerAbsent = trainerAbsent;
+    await seance.save();
+    const fresh = await Seance.findById(seance._id);
+
+    res.json({
+        seance: seancePublic(fresh),
+        reportedCount,
+        skippedAlreadyOnNext,
+        nextSeanceId,
+        nextSeanceStart,
+        noNextSeance,
+    });
+}
+
+/**
  * Données pour le calendrier : titre formation + nombre d’inscrits (séance ou inscription « toute formation »).
  */
 export async function listCalendarEvents(req, res) {
     const includeArchived =
-        req.query.includeArchived === "true" || req.query.includeArchived === "1";
+        req.query.includeArchived === "true" ||
+        req.query.includeArchived === "1";
     const agenceRaw = req.query.agence;
     const agence =
         agenceRaw === "strasbourg" || agenceRaw === "jean_moulin"
@@ -478,9 +619,7 @@ export async function listCalendarEvents(req, res) {
                 salleAgence: { $ifNull: ["$salle.agence", "jean_moulin"] },
             },
         },
-        ...(agence
-            ? [{ $match: { salleAgence: agence } }]
-            : []),
+        ...(agence ? [{ $match: { salleAgence: agence } }] : []),
         {
             $lookup: {
                 from: formationColl,
@@ -522,6 +661,7 @@ export async function listCalendarEvents(req, res) {
                 salleId: 1,
                 notes: 1,
                 capacity: 1,
+                trainerAbsent: 1,
                 formationTitle: "$formation.title",
                 formationColor: {
                     $ifNull: ["$formation.color", "#3B82F6"],
@@ -554,6 +694,7 @@ export async function listCalendarEvents(req, res) {
         agence: r.salleAgence || "jean_moulin",
         notes: r.notes || "",
         inscriptionCount: r.inscriptionCount,
+        trainerAbsent: Boolean(r.trainerAbsent),
     }));
 
     res.json({ events });

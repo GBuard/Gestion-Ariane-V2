@@ -13,6 +13,7 @@ export async function assertNoRoomOverlap(
     const filter = {
         salleId,
         isArchived: false,
+        trainerAbsent: { $ne: true },
         startDate: { $lt: endDate },
         endDate: { $gt: startDate },
     };

@@ -30,6 +30,8 @@ const inscriptionSchema = new mongoose.Schema(
             enum: INSCRIPTION_STATUSES,
             default: "inscrit",
         },
+        /** Message optionnel laissé par le référent à l’inscription. */
+        message: { type: String, default: "", trim: true },
     },
     { timestamps: true },
 );

@@ -133,7 +133,7 @@ export default function Beneficiaires() {
             email: "",
             phone: "",
             notes: "",
-            referentId: referents[0]?.id || "",
+            referentId: admin ? referents[0]?.id || "" : user?.id || "",
         });
     };
 
@@ -149,6 +149,27 @@ export default function Beneficiaires() {
         });
     };
 
+    const submitCreate = async (body, force = false) => {
+        try {
+            await createMut.mutateAsync({ ...body, force });
+        } catch (err) {
+            const data = err?.response?.data;
+            if (err?.response?.status === 409 && data?.code === "POSSIBLE_DUPLICATE") {
+                const names = (data.duplicates || [])
+                    .map((d) => `${d.firstName} ${d.lastName}`)
+                    .join(", ");
+                const ok = confirm(
+                    `Doublon possible détecté : ${names}.\n\nCréer quand même un nouveau bénéficiaire ?\n(Annuler pour réutiliser un existant dans la liste.)`,
+                );
+                if (ok) {
+                    await createMut.mutateAsync({ ...body, force: true });
+                }
+                return;
+            }
+            throw err;
+        }
+    };
+
     const onSubmit = (values) => {
         const body = {
             firstName: values.firstName,
@@ -156,10 +177,10 @@ export default function Beneficiaires() {
             email: values.email || undefined,
             phone: values.phone || undefined,
             notes: values.notes || undefined,
-            referentId: values.referentId,
+            referentId: admin ? values.referentId : user?.id,
         };
         if (editing === "new") {
-            createMut.mutate(body);
+            submitCreate(body);
         } else if (editing) {
             updateMut.mutate({ id: editing, body });
         }
@@ -187,7 +208,7 @@ export default function Beneficiaires() {
                         Personnes suivies par la structure.
                     </p>
                 </div>
-                {admin ? (
+                {admin || user?.role === "referent" ? (
                     <button
                         type="button"
                         onClick={openCreate}
@@ -274,7 +295,7 @@ export default function Beneficiaires() {
                 ) : null}
             </div>
 
-            {admin && editing ? (
+            {(admin || user?.role === "referent") && editing ? (
                 <form
                     onSubmit={handleSubmit(onSubmit)}
                     className="mb-8 bg-white border border-slate-200 rounded-lg p-5 shadow-sm space-y-4"
@@ -332,27 +353,31 @@ export default function Beneficiaires() {
                                 {...register("phone")}
                             />
                         </div>
-                        <div className="md:col-span-2">
-                            <label className="text-sm font-medium text-slate-700">
-                                Référent
-                            </label>
-                            <select
-                                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                                {...register("referentId")}
-                            >
-                                <option value="">— Choisir —</option>
-                                {referents.map((r) => (
-                                    <option key={r.id} value={r.id}>
-                                        {r.firstName} {r.lastName} ({r.email})
-                                    </option>
-                                ))}
-                            </select>
-                            {errors.referentId ? (
-                                <p className="text-sm text-red-600 mt-1">
-                                    {errors.referentId.message}
-                                </p>
-                            ) : null}
-                        </div>
+                        {admin ? (
+                            <div className="md:col-span-2">
+                                <label className="text-sm font-medium text-slate-700">
+                                    Référent
+                                </label>
+                                <select
+                                    className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                                    {...register("referentId")}
+                                >
+                                    <option value="">— Choisir —</option>
+                                    {referents.map((r) => (
+                                        <option key={r.id} value={r.id}>
+                                            {r.firstName} {r.lastName} ({r.email})
+                                        </option>
+                                    ))}
+                                </select>
+                                {errors.referentId ? (
+                                    <p className="text-sm text-red-600 mt-1">
+                                        {errors.referentId.message}
+                                    </p>
+                                ) : null}
+                            </div>
+                        ) : (
+                            <input type="hidden" {...register("referentId")} />
+                        )}
                         <div className="md:col-span-2">
                             <label className="text-sm font-medium text-slate-700">
                                 Notes

@@ -87,14 +87,51 @@ export async function getBeneficiaire(req, res) {
 }
 
 export async function createBeneficiaire(req, res) {
-    const { firstName, lastName, email, phone, notes, referentId } = req.body;
+    let { firstName, lastName, email, phone, notes, referentId, force } =
+        req.body;
+
+    if (req.user.role === "referent") {
+        referentId = req.user._id.toString();
+    } else if (!referentId) {
+        return res.status(400).json({ message: "referentId requis" });
+    }
 
     await assertReferentUser(referentId);
 
+    const first = String(firstName).trim();
+    const last = String(lastName).trim();
+    const emailNorm = email ? String(email).trim().toLowerCase() : "";
+
+    const nameRx = new RegExp(
+        `^${escapeRegex(first)}$`,
+        "i",
+    );
+    const lastRx = new RegExp(`^${escapeRegex(last)}$`, "i");
+
+    const orClauses = [
+        { firstName: nameRx, lastName: lastRx, isArchived: false },
+    ];
+    if (emailNorm) {
+        orClauses.push({ email: emailNorm, isArchived: false });
+    }
+
+    const possible = await Beneficiaire.find({ $or: orClauses })
+        .sort({ lastName: 1, firstName: 1 })
+        .lean();
+
+    if (possible.length > 0 && force !== true && force !== "true") {
+        return res.status(409).json({
+            message:
+                "Un ou plusieurs bénéficiaires similaires existent déjà. Utilisez un existant ou confirmez la création.",
+            code: "POSSIBLE_DUPLICATE",
+            duplicates: possible.map((b) => beneficiairePublic(b)),
+        });
+    }
+
     const b = await Beneficiaire.create({
-        firstName: firstName.trim(),
-        lastName: lastName.trim(),
-        email: email ? String(email).trim().toLowerCase() : "",
+        firstName: first,
+        lastName: last,
+        email: emailNorm,
         phone: phone ? String(phone).trim() : "",
         notes: notes != null ? String(notes) : "",
         referentId,

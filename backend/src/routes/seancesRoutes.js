@@ -9,6 +9,7 @@ import {
     updateSeance,
     archiveSeance,
     destroySeancePermanent,
+    setTrainerAbsent,
 } from "../controllers/seancesController.js";
 import { SALLE_AGENCES } from "../models/Salle.js";
 import { requireAuth } from "../middlewares/authMiddleware.js";
@@ -71,6 +72,18 @@ router.post(
     [param("id").isMongoId()],
     validateRequest,
     asyncHandler(destroySeancePermanent),
+);
+
+router.post(
+    "/:id/trainer-absent",
+    ...adminReferentFormateur,
+    [
+        param("id").isMongoId(),
+        body("trainerAbsent").isBoolean(),
+        body("reportBeneficiaires").optional().isBoolean(),
+    ],
+    validateRequest,
+    asyncHandler(setTrainerAbsent),
 );
 
 router.get(

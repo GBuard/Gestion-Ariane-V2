@@ -15,7 +15,7 @@ export function AdminRoute({ children }) {
     }
 
     if (!isAdmin(user)) {
-        return <Navigate to="/dashboard" replace />;
+        return <Navigate to="/calendrier" replace />;
     }
 
     return children;

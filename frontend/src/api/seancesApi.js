@@ -12,4 +12,6 @@ export const seancesApi = {
     update: (id, body) => api.put(`/api/seances/${id}`, body),
     archive: (id) => api.delete(`/api/seances/${id}`),
     destroy: (id) => api.post(`/api/seances/${id}/destroy`),
+    setTrainerAbsent: (id, body) =>
+        api.post(`/api/seances/${id}/trainer-absent`, body),
 };

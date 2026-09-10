@@ -52,7 +52,7 @@ router.post(
 
 router.post(
     "/",
-    ...adminOnly,
+    ...adminOrReferent,
     [
         body("firstName").trim().notEmpty(),
         body("lastName").trim().notEmpty(),
@@ -62,7 +62,8 @@ router.post(
             .normalizeEmail(),
         body("phone").optional().isString().trim(),
         body("notes").optional().isString(),
-        body("referentId").isMongoId(),
+        body("referentId").optional().isMongoId(),
+        body("force").optional().isBoolean(),
     ],
     validateRequest,
     asyncHandler(createBeneficiaire),

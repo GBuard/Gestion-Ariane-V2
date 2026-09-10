@@ -10,6 +10,7 @@ import {
     createInscriptionsBulk,
     updateInscription,
     deleteInscription,
+    removeFromSeance,
 } from "../controllers/inscriptionsController.js";
 import { INSCRIPTION_STATUSES } from "../models/Inscription.js";
 import { requireAuth } from "../middlewares/authMiddleware.js";
@@ -80,6 +81,10 @@ router.post(
             })
             .withMessage("seanceId invalide"),
         body("status").optional().isIn(INSCRIPTION_STATUSES),
+        body("message")
+            .optional({ nullable: true })
+            .isString()
+            .isLength({ max: 1000 }),
     ],
     validateRequest,
     asyncHandler(createInscriptionsBulk),
@@ -99,6 +104,10 @@ router.post(
             })
             .withMessage("seanceId invalide"),
         body("status").optional().isIn(INSCRIPTION_STATUSES),
+        body("message")
+            .optional({ nullable: true })
+            .isString()
+            .isLength({ max: 1000 }),
     ],
     validateRequest,
     asyncHandler(createInscription),
@@ -120,6 +129,17 @@ router.put(
     ],
     validateRequest,
     asyncHandler(updateInscription),
+);
+
+router.post(
+    "/:id/remove-from-seance",
+    ...adminReferent,
+    [
+        param("id").isMongoId(),
+        body("seanceId").isMongoId(),
+    ],
+    validateRequest,
+    asyncHandler(removeFromSeance),
 );
 
 router.delete(

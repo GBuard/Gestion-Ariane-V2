@@ -11,6 +11,7 @@ export function inscriptionPublic(doc) {
                 ? null
                 : seanceId?.toString?.() ?? String(seanceId),
         status: doc.status,
+        message: doc.message ?? "",
         createdAt: doc.createdAt,
         updatedAt: doc.updatedAt,
     };
