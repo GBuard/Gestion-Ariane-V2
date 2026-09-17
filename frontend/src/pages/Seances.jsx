@@ -1,14 +1,57 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
+import {
+    Archive,
+    Eye,
+    MoreHorizontal,
+    Pencil,
+    Plus,
+    Search,
+} from "lucide-react";
 import { useAuth } from "../context/AuthContext.jsx";
 import { isAdmin } from "../utils/roles.js";
+import { formatSeanceSlot } from "../utils/formatSeanceSlot.js";
 import { seancesApi } from "../api/seancesApi.js";
 import { formationsApi } from "../api/formationsApi.js";
 import { sallesApi } from "../api/sallesApi.js";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Badge } from "@/components/ui/badge";
+import {
+    Card,
+    CardContent,
+    CardDescription,
+    CardHeader,
+    CardTitle,
+} from "@/components/ui/card";
+import {
+    Table,
+    TableBody,
+    TableCell,
+    TableHead,
+    TableHeader,
+    TableRow,
+} from "@/components/ui/table";
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from "@/components/ui/select";
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuSeparator,
+    DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 function toLocalInput(iso) {
     if (!iso) return "";
@@ -20,6 +63,20 @@ function toLocalInput(iso) {
     const h = pad(d.getHours());
     const min = pad(d.getMinutes());
     return `${y}-${m}-${day}T${h}:${min}`;
+}
+
+function seanceStatus(x) {
+    if (x.isArchived) {
+        return { label: "Archivée", variant: "outline" };
+    }
+    if (x.trainerAbsent) {
+        return { label: "Formateur absent", variant: "destructive" };
+    }
+    const end = new Date(x.endDate);
+    if (!Number.isNaN(end.getTime()) && end.getTime() < Date.now()) {
+        return { label: "Passée", variant: "secondary" };
+    }
+    return { label: "À venir", variant: "default" };
 }
 
 const formSchema = z
@@ -46,12 +103,13 @@ const formSchema = z
 export default function Seances() {
     const { user } = useAuth();
     const admin = isAdmin(user);
+    const navigate = useNavigate();
     const qc = useQueryClient();
     const [editing, setEditing] = useState(null);
     const [listQ, setListQ] = useState("");
     const [debouncedQ, setDebouncedQ] = useState("");
-    const [formationFilter, setFormationFilter] = useState("");
-    const [sortField, setSortField] = useState("startDate");
+    const [formationFilter, setFormationFilter] = useState("all");
+    const [periodFilter, setPeriodFilter] = useState("upcoming");
     const [listIncludeArchived, setListIncludeArchived] = useState(false);
 
     useEffect(() => {
@@ -60,19 +118,20 @@ export default function Seances() {
     }, [listQ]);
 
     const listParams = useMemo(() => {
-        const p = {};
+        const p = { sort: "startDate" };
         if (debouncedQ) p.q = debouncedQ;
-        if (formationFilter) p.formationId = formationFilter;
-        if (sortField === "startDate_desc") p.sort = "startDate_desc";
-        else if (sortField === "formationTitle") p.sort = "formationTitle";
-        else if (sortField === "formationTitle_desc")
-            p.sort = "formationTitle_desc";
-        else p.sort = "startDate";
+        if (formationFilter && formationFilter !== "all") {
+            p.formationId = formationFilter;
+        }
+        if (periodFilter === "past" || periodFilter === "upcoming") {
+            p.period = periodFilter;
+            if (periodFilter === "past") p.sort = "startDate_desc";
+        }
         if (admin && listIncludeArchived) {
             p.includeArchived = true;
         }
         return p;
-    }, [admin, debouncedQ, formationFilter, listIncludeArchived, sortField]);
+    }, [admin, debouncedQ, formationFilter, listIncludeArchived, periodFilter]);
 
     const {
         data: seances,
@@ -191,365 +250,392 @@ export default function Seances() {
     };
 
     if (isLoading) {
-        return <p className="text-slate-600">Chargement…</p>;
+        return <p className="text-muted-foreground">Chargement…</p>;
     }
     if (isError) {
         return (
-            <p className="text-red-600">Impossible de charger les séances.</p>
+            <p className="text-destructive">
+                Impossible de charger les séances.
+            </p>
         );
     }
 
     return (
-        <div>
-            <div className="flex items-center justify-between gap-4 mb-6">
+        <div className="space-y-6">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                 <div>
-                    <h1 className="text-2xl font-semibold text-slate-900">
+                    <h1 className="text-2xl font-semibold tracking-tight">
                         Séances
                     </h1>
-                    <p className="text-slate-600 text-sm mt-1">
-                        Créneaux liés aux formations et aux salles. Règles
-                        métier : du lundi au vendredi, entre 9h et 17h,
-                        appliquées à la création / modification côté serveur.
+                    <p className="mt-1 text-sm text-muted-foreground">
+                        Vue synthétique des créneaux planifiés. Filtrez
+                        instantanément par formation ou plage.
                     </p>
                 </div>
                 {admin ? (
-                    <button
-                        type="button"
-                        onClick={openCreate}
-                        className="rounded-md bg-slate-900 text-white text-sm font-medium px-4 py-2 hover:bg-slate-800"
-                    >
-                        Nouvelle
-                    </button>
+                    <Button type="button" onClick={openCreate}>
+                        <Plus data-icon="inline-start" />
+                        Nouvelle séance
+                    </Button>
                 ) : null}
             </div>
 
-            <div className="mb-6 flex flex-col gap-3 md:flex-row md:flex-wrap md:items-end">
-                <div className="flex-1 min-w-[200px]">
-                    <label className="block text-xs font-medium text-slate-600 mb-1">
-                        Recherche (titre de formation)
-                    </label>
-                    <input
-                        type="search"
-                        value={listQ}
-                        onChange={(e) => setListQ(e.target.value)}
-                        placeholder="Ex. Numérique…"
-                        className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                    />
-                </div>
-                <div className="w-full md:w-64">
-                    <label className="block text-xs font-medium text-slate-600 mb-1">
-                        Formation
-                    </label>
-                    <select
-                        value={formationFilter}
-                        onChange={(e) => setFormationFilter(e.target.value)}
-                        className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                    >
-                        <option value="">Toutes</option>
-                        {activeFormations.map((f) => (
-                            <option key={f.id} value={f.id}>
-                                {f.title}
-                            </option>
-                        ))}
-                    </select>
-                </div>
-                <div className="w-full md:w-56">
-                    <label className="block text-xs font-medium text-slate-600 mb-1">
-                        Tri
-                    </label>
-                    <select
-                        value={sortField}
-                        onChange={(e) => setSortField(e.target.value)}
-                        className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                    >
-                        <option value="startDate">
-                            Date de début (plus proche)
-                        </option>
-                        <option value="startDate_desc">
-                            Date de début (plus lointaine)
-                        </option>
-                        <option value="formationTitle">
-                            Formation (A → Z)
-                        </option>
-                        <option value="formationTitle_desc">
-                            Formation (Z → A)
-                        </option>
-                    </select>
-                </div>
-                {admin ? (
-                    <div className="w-full md:w-auto flex items-center">
-                        <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
-                            <input
-                                type="checkbox"
-                                className="rounded border-slate-300"
-                                checked={listIncludeArchived}
-                                onChange={(e) =>
-                                    setListIncludeArchived(e.target.checked)
-                                }
+            <Card>
+                <CardHeader className="border-b pb-4">
+                    <CardTitle>Filtres</CardTitle>
+                    <CardDescription>
+                        Recherche textuelle, formation et plage temporelle.
+                    </CardDescription>
+                </CardHeader>
+                <CardContent className="pt-4">
+                    <div className="flex flex-col gap-3 lg:flex-row lg:flex-wrap lg:items-end">
+                        <div className="relative min-w-[200px] flex-1">
+                            <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
+                            <Input
+                                type="search"
+                                value={listQ}
+                                onChange={(e) => setListQ(e.target.value)}
+                                placeholder="Rechercher une formation…"
+                                className="pl-8"
                             />
-                            Inclure séances archivées
-                        </label>
+                        </div>
+                        <div className="w-full lg:w-56">
+                            <Label className="mb-1.5 block text-xs text-muted-foreground">
+                                Formation
+                            </Label>
+                            <Select
+                                value={formationFilter}
+                                onValueChange={setFormationFilter}
+                            >
+                                <SelectTrigger className="w-full">
+                                    <SelectValue placeholder="Toutes" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="all">Toutes</SelectItem>
+                                    {activeFormations.map((f) => (
+                                        <SelectItem key={f.id} value={f.id}>
+                                            {f.title}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        <div className="w-full lg:w-44">
+                            <Label className="mb-1.5 block text-xs text-muted-foreground">
+                                Plage
+                            </Label>
+                            <Select
+                                value={periodFilter}
+                                onValueChange={setPeriodFilter}
+                            >
+                                <SelectTrigger className="w-full">
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="upcoming">
+                                        À venir
+                                    </SelectItem>
+                                    <SelectItem value="past">
+                                        Passées
+                                    </SelectItem>
+                                    <SelectItem value="all">Toutes</SelectItem>
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        {admin ? (
+                            <label className="flex items-center gap-2 pb-1 text-sm">
+                                <Checkbox
+                                    checked={listIncludeArchived}
+                                    onCheckedChange={(v) =>
+                                        setListIncludeArchived(v === true)
+                                    }
+                                />
+                                Inclure les archivées
+                            </label>
+                        ) : null}
                     </div>
-                ) : null}
-            </div>
+                </CardContent>
+            </Card>
 
             {admin && editing ? (
-                <form
-                    onSubmit={handleSubmit(onSubmit)}
-                    className="mb-8 bg-white border border-slate-200 rounded-lg p-5 shadow-sm space-y-4"
-                >
-                    <h2 className="font-medium text-slate-900">
-                        {editing === "new"
-                            ? "Nouvelle séance"
-                            : "Modifier la séance"}
-                    </h2>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                            <label className="text-sm font-medium text-slate-700">
-                                Formation
-                            </label>
-                            <select
-                                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                                {...register("formationId")}
-                            >
-                                <option value="">— Choisir —</option>
-                                {activeFormations.map((f) => (
-                                    <option key={f.id} value={f.id}>
-                                        {f.title}
-                                    </option>
-                                ))}
-                            </select>
-                            {errors.formationId ? (
-                                <p className="text-sm text-red-600 mt-1">
-                                    {errors.formationId.message}
-                                </p>
-                            ) : null}
-                        </div>
-                        <div>
-                            <label className="text-sm font-medium text-slate-700">
-                                Salle
-                            </label>
-                            <select
-                                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                                {...register("salleId")}
-                            >
-                                <option value="">— Choisir —</option>
-                                {activeSalles.map((s) => (
-                                    <option key={s.id} value={s.id}>
-                                        {s.name} ({s.capacity} pl.)
-                                    </option>
-                                ))}
-                            </select>
-                            {errors.salleId ? (
-                                <p className="text-sm text-red-600 mt-1">
-                                    {errors.salleId.message}
-                                </p>
-                            ) : null}
-                        </div>
-                        <div>
-                            <label className="text-sm font-medium text-slate-700">
-                                Début
-                            </label>
-                            <input
-                                type="datetime-local"
-                                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                                {...register("startDate")}
-                            />
-                            {errors.startDate ? (
-                                <p className="text-sm text-red-600 mt-1">
-                                    {errors.startDate.message}
-                                </p>
-                            ) : null}
-                        </div>
-                        <div>
-                            <label className="text-sm font-medium text-slate-700">
-                                Fin
-                            </label>
-                            <input
-                                type="datetime-local"
-                                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                                {...register("endDate")}
-                            />
-                            {errors.endDate ? (
-                                <p className="text-sm text-red-600 mt-1">
-                                    {errors.endDate.message}
-                                </p>
-                            ) : null}
-                        </div>
-                        <div>
-                            <label className="text-sm font-medium text-slate-700">
-                                Capacité (optionnel)
-                            </label>
-                            <input
-                                type="number"
-                                min={1}
-                                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                                {...register("capacity")}
-                            />
-                        </div>
-                        <div className="md:col-span-2">
-                            <label className="text-sm font-medium text-slate-700">
-                                Notes
-                            </label>
-                            <textarea
-                                rows={2}
-                                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                                {...register("notes")}
-                            />
-                        </div>
-                    </div>
-                    <div className="flex gap-2">
-                        <button
-                            type="submit"
-                            className="rounded-md bg-slate-900 text-white text-sm px-4 py-2"
-                            disabled={
-                                createMut.isPending || updateMut.isPending
-                            }
+                <Card>
+                    <CardHeader className="border-b pb-4">
+                        <CardTitle>
+                            {editing === "new"
+                                ? "Nouvelle séance"
+                                : "Modifier la séance"}
+                        </CardTitle>
+                    </CardHeader>
+                    <CardContent className="pt-4">
+                        <form
+                            onSubmit={handleSubmit(onSubmit)}
+                            className="space-y-4"
                         >
-                            Enregistrer
-                        </button>
-                        <button
-                            type="button"
-                            className="rounded-md border border-slate-300 text-sm px-4 py-2"
-                            onClick={() => {
-                                setEditing(null);
-                                reset();
-                            }}
-                        >
-                            Annuler
-                        </button>
-                    </div>
-                    {(createMut.isError || updateMut.isError) && (
-                        <p className="text-sm text-red-600">
-                            Erreur (créneau ou salle déjà pris, ou données
-                            invalides).
-                        </p>
-                    )}
-                </form>
+                            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                                <div className="space-y-1.5">
+                                    <Label>Formation</Label>
+                                    <select
+                                        className="flex h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm"
+                                        {...register("formationId")}
+                                    >
+                                        <option value="">— Choisir —</option>
+                                        {activeFormations.map((f) => (
+                                            <option key={f.id} value={f.id}>
+                                                {f.title}
+                                            </option>
+                                        ))}
+                                    </select>
+                                    {errors.formationId ? (
+                                        <p className="text-sm text-destructive">
+                                            {errors.formationId.message}
+                                        </p>
+                                    ) : null}
+                                </div>
+                                <div className="space-y-1.5">
+                                    <Label>Salle</Label>
+                                    <select
+                                        className="flex h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm"
+                                        {...register("salleId")}
+                                    >
+                                        <option value="">— Choisir —</option>
+                                        {activeSalles.map((s) => (
+                                            <option key={s.id} value={s.id}>
+                                                {s.name} ({s.capacity} pl.)
+                                            </option>
+                                        ))}
+                                    </select>
+                                    {errors.salleId ? (
+                                        <p className="text-sm text-destructive">
+                                            {errors.salleId.message}
+                                        </p>
+                                    ) : null}
+                                </div>
+                                <div className="space-y-1.5">
+                                    <Label>Début</Label>
+                                    <Input
+                                        type="datetime-local"
+                                        {...register("startDate")}
+                                    />
+                                    {errors.startDate ? (
+                                        <p className="text-sm text-destructive">
+                                            {errors.startDate.message}
+                                        </p>
+                                    ) : null}
+                                </div>
+                                <div className="space-y-1.5">
+                                    <Label>Fin</Label>
+                                    <Input
+                                        type="datetime-local"
+                                        {...register("endDate")}
+                                    />
+                                    {errors.endDate ? (
+                                        <p className="text-sm text-destructive">
+                                            {errors.endDate.message}
+                                        </p>
+                                    ) : null}
+                                </div>
+                                <div className="space-y-1.5">
+                                    <Label>Capacité (optionnel)</Label>
+                                    <Input
+                                        type="number"
+                                        min={1}
+                                        {...register("capacity")}
+                                    />
+                                </div>
+                                <div className="space-y-1.5 md:col-span-2">
+                                    <Label>Notes</Label>
+                                    <textarea
+                                        rows={2}
+                                        className="flex w-full rounded-lg border border-input bg-transparent px-2.5 py-2 text-sm"
+                                        {...register("notes")}
+                                    />
+                                </div>
+                            </div>
+                            <div className="flex gap-2">
+                                <Button
+                                    type="submit"
+                                    disabled={
+                                        createMut.isPending ||
+                                        updateMut.isPending
+                                    }
+                                >
+                                    Enregistrer
+                                </Button>
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    onClick={() => {
+                                        setEditing(null);
+                                        reset();
+                                    }}
+                                >
+                                    Annuler
+                                </Button>
+                            </div>
+                            {(createMut.isError || updateMut.isError) && (
+                                <p className="text-sm text-destructive">
+                                    Erreur (créneau ou salle déjà pris, ou
+                                    données invalides).
+                                </p>
+                            )}
+                        </form>
+                    </CardContent>
+                </Card>
             ) : null}
 
-            <div className="bg-white border border-slate-200 rounded-lg shadow-sm overflow-x-auto">
-                <table className="min-w-full text-sm">
-                    <thead>
-                        <tr className="border-b border-slate-200 bg-slate-50 text-left">
-                            <th className="px-4 py-3 font-medium text-slate-700">
-                                Début
-                            </th>
-                            <th className="px-4 py-3 font-medium text-slate-700">
-                                Fin
-                            </th>
-                            <th className="px-4 py-3 font-medium text-slate-700">
-                                Formation
-                            </th>
-                            <th className="px-4 py-3 font-medium text-slate-700">
-                                Salle
-                            </th>
-                            <th className="px-4 py-3 font-medium text-slate-700">
-                                Statut
-                            </th>
-                            <th className="px-4 py-3 font-medium text-slate-700 w-32">
-                                Détail
-                            </th>
-                            {admin ? (
-                                <th className="px-4 py-3 font-medium text-slate-700 w-40">
+            <Card className="py-0">
+                <CardContent className="px-0">
+                    <Table>
+                        <TableHeader>
+                            <TableRow>
+                                <TableHead className="pl-4">
+                                    Date / Heure
+                                </TableHead>
+                                <TableHead>Formation</TableHead>
+                                <TableHead>Salle</TableHead>
+                                <TableHead>Inscrits</TableHead>
+                                <TableHead>Statut</TableHead>
+                                <TableHead className="w-12 pr-4 text-right">
                                     Actions
-                                </th>
-                            ) : null}
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {seances?.map((x) => {
-                            const f = formations?.find(
-                                (i) => i.id === x.formationId,
-                            );
-                            const formationLabel =
-                                x.formationTitle || f?.title || x.formationId;
-                            const s = salles?.find((i) => i.id === x.salleId);
-                            return (
-                                <tr
-                                    key={x.id}
-                                    className="border-b border-slate-100 hover:bg-slate-50/80"
-                                >
-                                    <td className="px-4 py-3 whitespace-nowrap">
-                                        {new Date(x.startDate).toLocaleString(
-                                            "fr-FR",
-                                        )}
-                                    </td>
-                                    <td className="px-4 py-3 whitespace-nowrap">
-                                        {new Date(x.endDate).toLocaleString(
-                                            "fr-FR",
-                                        )}
-                                    </td>
-                                    <td className="px-4 py-3">
-                                        {formationLabel}
-                                    </td>
-                                    <td className="px-4 py-3">
-                                        {s?.name ?? x.salleId}
-                                    </td>
-                                    <td className="px-4 py-3">
-                                        {x.isArchived ? (
-                                            <span className="text-amber-700">
-                                                Archivée
-                                            </span>
-                                        ) : (
-                                            <span className="text-emerald-700">
-                                                Active
-                                            </span>
-                                        )}
-                                    </td>
-                                    <td className="px-4 py-3">
-                                        {!x.isArchived ? (
-                                            <Link
-                                                to={`/seances/${x.id}`}
-                                                className="text-slate-700 hover:underline"
-                                            >
-                                                Inscrits &amp; présences
-                                            </Link>
-                                        ) : (
-                                            <span className="text-slate-400">
-                                                —
-                                            </span>
-                                        )}
-                                    </td>
-                                    {admin ? (
-                                        <td className="px-4 py-3 space-x-2 whitespace-nowrap">
-                                            <button
-                                                type="button"
-                                                className="text-slate-700 hover:underline"
-                                                onClick={() => openEdit(x)}
-                                            >
-                                                Modifier
-                                            </button>
-                                            {!x.isArchived ? (
-                                                <button
-                                                    type="button"
-                                                    className="text-red-700 hover:underline"
-                                                    onClick={() => {
-                                                        if (
-                                                            confirm(
-                                                                "Archiver cette séance ?",
-                                                            )
-                                                        ) {
-                                                            archiveMut.mutate(
-                                                                x.id,
-                                                            );
-                                                        }
+                                </TableHead>
+                            </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                            {seances?.map((x) => {
+                                const f = formations?.find(
+                                    (i) => i.id === x.formationId,
+                                );
+                                const formationLabel =
+                                    x.formationTitle ||
+                                    f?.title ||
+                                    x.formationId;
+                                const s = salles?.find(
+                                    (i) => i.id === x.salleId,
+                                );
+                                const status = seanceStatus(x);
+                                const cap =
+                                    x.capacity != null ? x.capacity : null;
+                                const count = x.inscriptionCount ?? 0;
+
+                                return (
+                                    <TableRow key={x.id}>
+                                        <TableCell className="pl-4 font-medium whitespace-normal">
+                                            {formatSeanceSlot(
+                                                x.startDate,
+                                                x.endDate,
+                                            )}
+                                        </TableCell>
+                                        <TableCell className="max-w-[240px] whitespace-normal">
+                                            <div className="flex items-center gap-2 min-w-0">
+                                                <span
+                                                    className="size-2.5 shrink-0 rounded-full ring-1 ring-black/10"
+                                                    style={{
+                                                        backgroundColor:
+                                                            x.formationColor ||
+                                                            f?.color ||
+                                                            "#3B82F6",
                                                     }}
-                                                >
-                                                    Archiver
-                                                </button>
-                                            ) : null}
-                                        </td>
-                                    ) : null}
-                                </tr>
-                            );
-                        })}
-                    </tbody>
-                </table>
-                {!seances?.length ? (
-                    <p className="p-6 text-slate-500">Aucune séance.</p>
-                ) : null}
-            </div>
+                                                    aria-hidden
+                                                />
+                                                <span className="truncate">
+                                                    {formationLabel}
+                                                </span>
+                                            </div>
+                                        </TableCell>
+                                        <TableCell>
+                                            {s?.name ?? x.salleId}
+                                        </TableCell>
+                                        <TableCell>
+                                            {cap != null
+                                                ? `${count} / ${cap}`
+                                                : String(count)}
+                                        </TableCell>
+                                        <TableCell>
+                                            <Badge variant={status.variant}>
+                                                {status.label}
+                                            </Badge>
+                                        </TableCell>
+                                        <TableCell className="pr-4 text-right">
+                                            <DropdownMenu>
+                                                <DropdownMenuTrigger asChild>
+                                                    <Button
+                                                        type="button"
+                                                        variant="ghost"
+                                                        size="icon-sm"
+                                                        aria-label="Actions"
+                                                    >
+                                                        <MoreHorizontal />
+                                                    </Button>
+                                                </DropdownMenuTrigger>
+                                                <DropdownMenuContent align="end">
+                                                    {!x.isArchived ? (
+                                                        <DropdownMenuItem
+                                                            onClick={() =>
+                                                                navigate(
+                                                                    `/seances/${x.id}`,
+                                                                )
+                                                            }
+                                                        >
+                                                            <Eye />
+                                                            Voir la fiche
+                                                        </DropdownMenuItem>
+                                                    ) : null}
+                                                    {admin ? (
+                                                        <>
+                                                            {!x.isArchived ? (
+                                                                <DropdownMenuSeparator />
+                                                            ) : null}
+                                                            <DropdownMenuItem
+                                                                onClick={() =>
+                                                                    openEdit(x)
+                                                                }
+                                                            >
+                                                                <Pencil />
+                                                                Modifier
+                                                            </DropdownMenuItem>
+                                                            {!x.isArchived ? (
+                                                                <DropdownMenuItem
+                                                                    variant="destructive"
+                                                                    onClick={() => {
+                                                                        if (
+                                                                            confirm(
+                                                                                "Archiver cette séance ?",
+                                                                            )
+                                                                        ) {
+                                                                            archiveMut.mutate(
+                                                                                x.id,
+                                                                            );
+                                                                        }
+                                                                    }}
+                                                                >
+                                                                    <Archive />
+                                                                    Archiver
+                                                                </DropdownMenuItem>
+                                                            ) : null}
+                                                        </>
+                                                    ) : null}
+                                                    {x.isArchived && !admin ? (
+                                                        <DropdownMenuItem
+                                                            disabled
+                                                        >
+                                                            Aucune action
+                                                        </DropdownMenuItem>
+                                                    ) : null}
+                                                </DropdownMenuContent>
+                                            </DropdownMenu>
+                                        </TableCell>
+                                    </TableRow>
+                                );
+                            })}
+                        </TableBody>
+                    </Table>
+                    {!seances?.length ? (
+                        <p className="p-6 text-sm text-muted-foreground">
+                            Aucune séance pour ces filtres.
+                        </p>
+                    ) : null}
+                </CardContent>
+            </Card>
         </div>
     );
 }

@@ -134,23 +134,66 @@ export async function listSeances(req, res) {
         sort === "startDate_desc" ? { startDate: -1 } : { startDate: 1 };
 
     const list = await Seance.find(filter)
-        .populate({ path: "formationId", select: "title" })
+        .populate({ path: "formationId", select: "title color" })
         .sort(sortSpec)
         .lean();
 
+    const seanceIds = list.map((x) => x._id);
+    const formationIds = [
+        ...new Set(
+            list.map((x) => {
+                const fid =
+                    x.formationId && typeof x.formationId === "object"
+                        ? x.formationId._id
+                        : x.formationId;
+                return fid?.toString?.() ?? String(fid);
+            }),
+        ),
+    ].filter(Boolean);
+
+    const inscriptionRows =
+        seanceIds.length > 0
+            ? await Inscription.find({
+                  formationId: {
+                      $in: formationIds.map(
+                          (id) => new mongoose.Types.ObjectId(id),
+                      ),
+                  },
+                  status: { $ne: "annule" },
+                  $or: [
+                      { seanceId: { $in: seanceIds } },
+                      { seanceId: null },
+                  ],
+              })
+                  .select("formationId seanceId beneficiaireId")
+                  .lean()
+            : [];
+
     let rows = list.map((x) => {
-        const title =
+        const formationDoc =
             x.formationId && typeof x.formationId === "object"
-                ? x.formationId.title
-                : "";
-        const fid =
-            x.formationId && typeof x.formationId === "object"
-                ? x.formationId._id
-                : x.formationId;
+                ? x.formationId
+                : null;
+        const title = formationDoc?.title || "";
+        const formationColor = formationDoc?.color || "#3B82F6";
+        const fid = formationDoc?._id ?? x.formationId;
         const plain = { ...x, formationId: fid };
+        const sid = x._id.toString();
+        const fidStr = fid?.toString?.() ?? String(fid);
+        const relevant = inscriptionRows.filter(
+            (row) =>
+                row.formationId?.toString() === fidStr &&
+                (row.seanceId == null || row.seanceId.toString() === sid),
+        );
+        const inscriptionCount = mergeInscriptionsForSeance(
+            relevant,
+            sid,
+        ).length;
         return {
             ...seancePublic(plain),
             formationTitle: title || "",
+            formationColor,
+            inscriptionCount,
         };
     });
 

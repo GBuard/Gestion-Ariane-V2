@@ -163,6 +163,7 @@ export default function Calendrier() {
                         week: "Semaine",
                     }}
                     events={events}
+                    slotEventOverlap={false}
                     eventClick={(info) => {
                         info.jsEvent.preventDefault();
                         navigate(`/seances/${info.event.id}`);
