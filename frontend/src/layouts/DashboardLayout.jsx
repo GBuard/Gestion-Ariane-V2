@@ -31,8 +31,7 @@ export function DashboardLayout() {
     const location = useLocation();
     const admin = isAdmin(user);
     const adminSectionActive = ADMIN_PATHS.some(
-        (p) =>
-            location.pathname === p || location.pathname.startsWith(`${p}/`),
+        (p) => location.pathname === p || location.pathname.startsWith(`${p}/`),
     );
     const [adminOpen, setAdminOpen] = useState(adminSectionActive);
 
@@ -57,16 +56,15 @@ export function DashboardLayout() {
                     <NavLink to="/calendrier" className={navCls}>
                         Calendrier
                     </NavLink>
-                    <NavLink to="/beneficiaires" className={navCls}>
-                        Liste Bénéficiaires
-                    </NavLink>
                     <NavLink to="/seances" className={navCls}>
                         Séances
                     </NavLink>
                     <NavLink to="/formations" className={navCls}>
                         Formations
                     </NavLink>
-
+                    <NavLink to="/beneficiaires" className={navCls}>
+                        Liste Bénéficiaires
+                    </NavLink>
                     <div
                         className="my-3 border-t border-slate-700"
                         role="separator"
@@ -100,10 +98,7 @@ export function DashboardLayout() {
                             <NavLink to="/salles" className={adminSubCls}>
                                 Salles
                             </NavLink>
-                            <NavLink
-                                to="/statistiques"
-                                className={adminSubCls}
-                            >
+                            <NavLink to="/statistiques" className={adminSubCls}>
                                 Statistiques
                             </NavLink>
                             {admin ? (
@@ -114,10 +109,7 @@ export function DashboardLayout() {
                                     Utilisateurs
                                 </NavLink>
                             ) : null}
-                            <NavLink
-                                to="/historique"
-                                className={adminSubCls}
-                            >
+                            <NavLink to="/historique" className={adminSubCls}>
                                 Archives
                             </NavLink>
                         </div>

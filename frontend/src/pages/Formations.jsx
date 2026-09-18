@@ -1,13 +1,36 @@
 import { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useForm } from "react-hook-form";
+import { Controller, useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
+import { Archive, Pencil, Plus, Users } from "lucide-react";
 import { useAuth } from "../context/AuthContext.jsx";
 import { isAdmin } from "../utils/roles.js";
 import { formationsApi } from "../api/formationsApi.js";
 import { usersApi } from "../api/usersApi.js";
 import { sallesApi } from "../api/sallesApi.js";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Separator } from "@/components/ui/separator";
+import {
+    Card,
+    CardContent,
+    CardDescription,
+    CardFooter,
+    CardHeader,
+    CardTitle,
+} from "@/components/ui/card";
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+} from "@/components/ui/dialog";
 
 const formSchema = z
     .object({
@@ -104,12 +127,127 @@ const defaultFormValues = {
     salleId: "",
 };
 
+const WEEKDAY_PLURAL = {
+    lundi: "lundis",
+    mardi: "mardis",
+    mercredi: "mercredis",
+    jeudi: "jeudis",
+    vendredi: "vendredis",
+    samedi: "samedis",
+    dimanche: "dimanches",
+};
+
+function formatTimeLabel(hhmm) {
+    if (!hhmm) return "";
+    const [h, m] = hhmm.trim().split(":");
+    if (!h) return hhmm;
+    return m === "00" ? `${Number(h)}h00` : `${Number(h)}h${m}`;
+}
+
+/** Ex. « Tous les lundis à 9h00 » */
+function formatRecurrenceSummary(f) {
+    const dayRaw = (f.weekdayLabel || "").trim();
+    const schedule = (f.scheduleLabel || "").trim();
+    if (!dayRaw || dayRaw === "—" || !schedule || schedule === "—") {
+        return "Récurrence non définie";
+    }
+    const dayKey = dayRaw.toLowerCase();
+    const plural = WEEKDAY_PLURAL[dayKey] || `${dayKey}s`;
+    const startPart = schedule.split("–")[0]?.trim() || schedule;
+    return `Tous les ${plural} à ${formatTimeLabel(startPart)}`;
+}
+
+function FieldError({ message }) {
+    if (!message) return null;
+    return <p className="text-xs text-destructive">{message}</p>;
+}
+
+function RecurrenceFields({ register, errors, activeSalles }) {
+    return (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="space-y-1.5">
+                <Label htmlFor="periodStart">Période — début</Label>
+                <Input
+                    id="periodStart"
+                    type="date"
+                    {...register("periodStart")}
+                />
+                <FieldError message={errors.periodStart?.message} />
+            </div>
+            <div className="space-y-1.5">
+                <Label htmlFor="periodEnd">Période — fin</Label>
+                <Input id="periodEnd" type="date" {...register("periodEnd")} />
+                <FieldError message={errors.periodEnd?.message} />
+            </div>
+            <div className="space-y-1.5">
+                <Label htmlFor="frequency">Fréquence</Label>
+                <select
+                    id="frequency"
+                    className="flex h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm"
+                    {...register("frequency")}
+                >
+                    <option value="weekly">Hebdomadaire</option>
+                    <option value="biweekly">Bi-hebdomadaire</option>
+                    <option value="monthly">Mensuel</option>
+                </select>
+            </div>
+            <div className="space-y-1.5">
+                <Label htmlFor="weekday">Jour</Label>
+                <select
+                    id="weekday"
+                    className="flex h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm"
+                    {...register("weekday")}
+                >
+                    <option value="1">Lundi</option>
+                    <option value="2">Mardi</option>
+                    <option value="3">Mercredi</option>
+                    <option value="4">Jeudi</option>
+                    <option value="5">Vendredi</option>
+                    <option value="6">Samedi</option>
+                    <option value="7">Dimanche</option>
+                </select>
+            </div>
+            <div className="space-y-1.5">
+                <Label htmlFor="startTime">Créneau — début</Label>
+                <Input
+                    id="startTime"
+                    type="time"
+                    {...register("startTime")}
+                />
+                <FieldError message={errors.startTime?.message} />
+            </div>
+            <div className="space-y-1.5">
+                <Label htmlFor="endTime">Créneau — fin</Label>
+                <Input id="endTime" type="time" {...register("endTime")} />
+                <FieldError message={errors.endTime?.message} />
+            </div>
+            <div className="space-y-1.5 sm:col-span-2">
+                <Label htmlFor="salleId">Salle</Label>
+                <select
+                    id="salleId"
+                    className="flex h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm"
+                    {...register("salleId")}
+                >
+                    <option value="">— Choisir une salle —</option>
+                    {activeSalles.map((s) => (
+                        <option key={s.id} value={s.id}>
+                            {s.name} ({s.capacity} pl.)
+                        </option>
+                    ))}
+                </select>
+                <FieldError message={errors.salleId?.message} />
+            </div>
+        </div>
+    );
+}
+
 export default function Formations() {
     const { user } = useAuth();
     const admin = isAdmin(user);
     const qc = useQueryClient();
     const [editing, setEditing] = useState(null);
     const [createInfo, setCreateInfo] = useState(null);
+
     const { data, isLoading, isError } = useQuery({
         queryKey: ["formations", "actives"],
         queryFn: async () => {
@@ -156,6 +294,7 @@ export default function Formations() {
         handleSubmit,
         reset,
         watch,
+        control,
         formState: { errors },
     } = useForm({
         resolver: zodResolver(formSchema),
@@ -164,6 +303,7 @@ export default function Formations() {
 
     const generateSeances = watch("generateSeances");
     const editRegenerate = watch("editRegenerate");
+    const colorValue = watch("color");
 
     const createMut = useMutation({
         mutationFn: (body) => formationsApi.create(body),
@@ -290,6 +430,11 @@ export default function Formations() {
         });
     };
 
+    const closeDialog = () => {
+        setEditing(null);
+        reset(defaultFormValues);
+    };
+
     const onSubmit = (values) => {
         setCreateInfo(null);
         if (editing === "new") {
@@ -305,544 +450,333 @@ export default function Formations() {
         "Erreur à l’enregistrement.";
 
     if (isLoading) {
-        return <p className="text-slate-600">Chargement…</p>;
+        return <p className="text-muted-foreground">Chargement…</p>;
     }
     if (isError) {
         return (
-            <p className="text-red-600">
+            <p className="text-destructive">
                 Impossible de charger les formations.
             </p>
         );
     }
 
+    const dialogOpen = Boolean(editing);
+
     return (
-        <div>
-            <div className="flex items-center justify-between gap-4 mb-6">
+        <div className="space-y-6">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                 <div>
-                    <h1 className="text-2xl font-semibold text-slate-900">
+                    <h1 className="text-2xl font-semibold tracking-tight">
                         Formations
                     </h1>
-                    <p className="text-slate-600 text-sm mt-1">
-                        Ateliers et parcours proposés. La récurrence génère les
-                        séances à la création ; récurrence modifiable à l’édition.
+                    <p className="mt-1 text-sm text-muted-foreground">
+                        Ateliers et paramétrage de récurrence. La liste reste
+                        lisible ; la création / édition se fait dans une fenêtre.
                     </p>
                 </div>
                 {admin ? (
-                    <button
-                        type="button"
-                        onClick={openCreate}
-                        className="rounded-md bg-slate-900 text-white text-sm font-medium px-4 py-2 hover:bg-slate-800"
-                    >
-                        Nouvelle
-                    </button>
+                    <Button type="button" onClick={openCreate}>
+                        <Plus data-icon="inline-start" />
+                        Nouvelle formation
+                    </Button>
                 ) : null}
             </div>
 
-            {admin && editing ? (
-                <form
-                    onSubmit={handleSubmit(onSubmit)}
-                    className="mb-8 bg-white border border-slate-200 rounded-lg p-5 shadow-sm space-y-4"
-                >
-                    <h2 className="font-medium text-slate-900">
-                        {editing === "new"
-                            ? "Nouvelle formation"
-                            : "Modifier la formation"}
-                    </h2>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div className="md:col-span-2">
-                            <label className="text-sm font-medium text-slate-700">
-                                Titre
-                            </label>
-                            <input
-                                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                                {...register("title")}
-                            />
-                            {errors.title ? (
-                                <p className="text-sm text-red-600 mt-1">
-                                    {errors.title.message}
-                                </p>
-                            ) : null}
-                        </div>
-                        <div className="md:col-span-2">
-                            <label className="text-sm font-medium text-slate-700">
-                                Description
-                            </label>
-                            <textarea
-                                rows={3}
-                                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                                {...register("description")}
-                            />
-                        </div>
-                        <div>
-                            <label className="text-sm font-medium text-slate-700">
-                                Intervenant
-                            </label>
-                            <select
-                                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                                {...register("trainerId")}
-                            >
-                                <option value="">— Choisir —</option>
-                                {trainers.map((t) => (
-                                    <option key={t.id} value={t.id}>
-                                        {t.firstName} {t.lastName} ({t.role})
-                                    </option>
-                                ))}
-                            </select>
-                            {errors.trainerId ? (
-                                <p className="text-sm text-red-600 mt-1">
-                                    {errors.trainerId.message}
-                                </p>
-                            ) : null}
-                        </div>
-                        <div>
-                            <label className="text-sm font-medium text-slate-700">
-                                Capacité max (optionnel)
-                            </label>
-                            <input
-                                type="number"
-                                min={1}
-                                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                                {...register("capacity")}
-                            />
-                            {errors.capacity ? (
-                                <p className="text-sm text-red-600 mt-1">
-                                    {errors.capacity.message}
-                                </p>
-                            ) : null}
-                        </div>
-                        <div>
-                            <label className="text-sm font-medium text-slate-700">
-                                Couleur (calendrier)
-                            </label>
-                            <div className="mt-1 flex items-center gap-3">
-                                <input
-                                    type="color"
-                                    className="h-9 w-12 cursor-pointer rounded border border-slate-300"
-                                    {...register("color")}
-                                />
-                                <span className="text-xs font-mono text-slate-600">
-                                    {watch("color") || "#3B82F6"}
-                                </span>
-                            </div>
-                            {errors.color ? (
-                                <p className="text-sm text-red-600 mt-1">
-                                    {errors.color.message}
-                                </p>
-                            ) : null}
-                        </div>
-                    </div>
-
-                    {editing === "new" ? (
-                        <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 space-y-4">
-                            <label className="flex items-center gap-2 text-sm font-medium text-slate-800">
-                                <input
-                                    type="checkbox"
-                                    className="rounded border-slate-300"
-                                    {...register("generateSeances")}
-                                />
-                                Générer automatiquement les séances (récurrence)
-                            </label>
-                            {generateSeances ? (
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    <div>
-                                        <label className="text-sm font-medium text-slate-700">
-                                            Période — début
-                                        </label>
-                                        <input
-                                            type="date"
-                                            className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                                            {...register("periodStart")}
-                                        />
-                                        {errors.periodStart ? (
-                                            <p className="text-sm text-red-600 mt-1">
-                                                {errors.periodStart.message}
-                                            </p>
-                                        ) : null}
-                                    </div>
-                                    <div>
-                                        <label className="text-sm font-medium text-slate-700">
-                                            Période — fin
-                                        </label>
-                                        <input
-                                            type="date"
-                                            className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                                            {...register("periodEnd")}
-                                        />
-                                        {errors.periodEnd ? (
-                                            <p className="text-sm text-red-600 mt-1">
-                                                {errors.periodEnd.message}
-                                            </p>
-                                        ) : null}
-                                    </div>
-                                    <div>
-                                        <label className="text-sm font-medium text-slate-700">
-                                            Fréquence
-                                        </label>
-                                        <select
-                                            className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                                            {...register("frequency")}
-                                        >
-                                            <option value="weekly">
-                                                Hebdomadaire
-                                            </option>
-                                            <option value="biweekly">
-                                                Bi-hebdomadaire
-                                            </option>
-                                            <option value="monthly">
-                                                Mensuel
-                                            </option>
-                                        </select>
-                                    </div>
-                                    <div>
-                                        <label className="text-sm font-medium text-slate-700">
-                                            Jour de la semaine
-                                        </label>
-                                        <select
-                                            className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                                            {...register("weekday")}
-                                        >
-                                            <option value="1">Lundi</option>
-                                            <option value="2">Mardi</option>
-                                            <option value="3">Mercredi</option>
-                                            <option value="4">Jeudi</option>
-                                            <option value="5">Vendredi</option>
-                                            <option value="6">Samedi</option>
-                                            <option value="7">Dimanche</option>
-                                        </select>
-                                    </div>
-                                    <div>
-                                        <label className="text-sm font-medium text-slate-700">
-                                            Heure de début
-                                        </label>
-                                        <input
-                                            type="time"
-                                            className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                                            {...register("startTime")}
-                                        />
-                                        {errors.startTime ? (
-                                            <p className="text-sm text-red-600 mt-1">
-                                                {errors.startTime.message}
-                                            </p>
-                                        ) : null}
-                                    </div>
-                                    <div>
-                                        <label className="text-sm font-medium text-slate-700">
-                                            Heure de fin
-                                        </label>
-                                        <input
-                                            type="time"
-                                            className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                                            {...register("endTime")}
-                                        />
-                                        {errors.endTime ? (
-                                            <p className="text-sm text-red-600 mt-1">
-                                                {errors.endTime.message}
-                                            </p>
-                                        ) : null}
-                                    </div>
-                                    <div className="md:col-span-2">
-                                        <label className="text-sm font-medium text-slate-700">
-                                            Salle
-                                        </label>
-                                        <select
-                                            className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                                            {...register("salleId")}
-                                        >
-                                            <option value="">
-                                                — Choisir une salle —
-                                            </option>
-                                            {activeSalles.map((s) => (
-                                                <option key={s.id} value={s.id}>
-                                                    {s.name} ({s.capacity}{" "}
-                                                    pl.)
-                                                </option>
-                                            ))}
-                                        </select>
-                                        {errors.salleId ? (
-                                            <p className="text-sm text-red-600 mt-1">
-                                                {errors.salleId.message}
-                                            </p>
-                                        ) : null}
-                                    </div>
-                                </div>
-                            ) : null}
-                        </div>
-                    ) : null}
-
-                    {editing && editing !== "new" ? (
-                        <div className="rounded-lg border border-amber-200 bg-amber-50/60 p-4 space-y-4">
-                            <label className="flex items-center gap-2 text-sm font-medium text-amber-950">
-                                <input
-                                    type="checkbox"
-                                    className="rounded border-slate-300"
-                                    {...register("editRegenerate")}
-                                />
-                                Régénérer les séances (nouvelle récurrence)
-                            </label>
-                            <p className="text-xs text-amber-900">
-                                Toutes les séances et inscriptions actuelles de
-                                cette formation seront supprimées avant la
-                                création des nouveaux créneaux.
-                            </p>
-                            {editRegenerate ? (
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    <div>
-                                        <label className="text-sm font-medium text-slate-700">
-                                            Période — début
-                                        </label>
-                                        <input
-                                            type="date"
-                                            className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                                            {...register("periodStart")}
-                                        />
-                                        {errors.periodStart ? (
-                                            <p className="text-sm text-red-600 mt-1">
-                                                {errors.periodStart.message}
-                                            </p>
-                                        ) : null}
-                                    </div>
-                                    <div>
-                                        <label className="text-sm font-medium text-slate-700">
-                                            Période — fin
-                                        </label>
-                                        <input
-                                            type="date"
-                                            className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                                            {...register("periodEnd")}
-                                        />
-                                        {errors.periodEnd ? (
-                                            <p className="text-sm text-red-600 mt-1">
-                                                {errors.periodEnd.message}
-                                            </p>
-                                        ) : null}
-                                    </div>
-                                    <div>
-                                        <label className="text-sm font-medium text-slate-700">
-                                            Fréquence
-                                        </label>
-                                        <select
-                                            className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                                            {...register("frequency")}
-                                        >
-                                            <option value="weekly">
-                                                Hebdomadaire
-                                            </option>
-                                            <option value="biweekly">
-                                                Bi-hebdomadaire
-                                            </option>
-                                            <option value="monthly">
-                                                Mensuel
-                                            </option>
-                                        </select>
-                                    </div>
-                                    <div>
-                                        <label className="text-sm font-medium text-slate-700">
-                                            Jour de la semaine
-                                        </label>
-                                        <select
-                                            className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                                            {...register("weekday")}
-                                        >
-                                            <option value="1">Lundi</option>
-                                            <option value="2">Mardi</option>
-                                            <option value="3">Mercredi</option>
-                                            <option value="4">Jeudi</option>
-                                            <option value="5">Vendredi</option>
-                                            <option value="6">Samedi</option>
-                                            <option value="7">Dimanche</option>
-                                        </select>
-                                    </div>
-                                    <div>
-                                        <label className="text-sm font-medium text-slate-700">
-                                            Heure de début
-                                        </label>
-                                        <input
-                                            type="time"
-                                            className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                                            {...register("startTime")}
-                                        />
-                                        {errors.startTime ? (
-                                            <p className="text-sm text-red-600 mt-1">
-                                                {errors.startTime.message}
-                                            </p>
-                                        ) : null}
-                                    </div>
-                                    <div>
-                                        <label className="text-sm font-medium text-slate-700">
-                                            Heure de fin
-                                        </label>
-                                        <input
-                                            type="time"
-                                            className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                                            {...register("endTime")}
-                                        />
-                                        {errors.endTime ? (
-                                            <p className="text-sm text-red-600 mt-1">
-                                                {errors.endTime.message}
-                                            </p>
-                                        ) : null}
-                                    </div>
-                                    <div className="md:col-span-2">
-                                        <label className="text-sm font-medium text-slate-700">
-                                            Salle
-                                        </label>
-                                        <select
-                                            className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                                            {...register("salleId")}
-                                        >
-                                            <option value="">
-                                                — Choisir une salle —
-                                            </option>
-                                            {activeSalles.map((s) => (
-                                                <option key={s.id} value={s.id}>
-                                                    {s.name} ({s.capacity} pl.)
-                                                </option>
-                                            ))}
-                                        </select>
-                                        {errors.salleId ? (
-                                            <p className="text-sm text-red-600 mt-1">
-                                                {errors.salleId.message}
-                                            </p>
-                                        ) : null}
-                                    </div>
-                                </div>
-                            ) : null}
-                        </div>
-                    ) : null}
-
-                    <div className="flex gap-2">
-                        <button
-                            type="submit"
-                            className="rounded-md bg-slate-900 text-white text-sm px-4 py-2"
-                            disabled={createMut.isPending || updateMut.isPending}
-                        >
-                            Enregistrer
-                        </button>
-                        <button
-                            type="button"
-                            className="rounded-md border border-slate-300 text-sm px-4 py-2"
-                            onClick={() => {
-                                setEditing(null);
-                                reset(defaultFormValues);
-                                setCreateInfo(null);
-                            }}
-                        >
-                            Annuler
-                        </button>
-                    </div>
-                    {createInfo ? (
-                        <p className="text-sm text-emerald-700">{createInfo}</p>
-                    ) : null}
-                    {createMut.isError ? (
-                        <p className="text-sm text-red-600">
-                            {apiErrorMessage(createMut.error)}
-                        </p>
-                    ) : null}
-                    {updateMut.isError ? (
-                        <p className="text-sm text-red-600">
-                            {apiErrorMessage(updateMut.error)}
-                        </p>
-                    ) : null}
-                </form>
+            {createInfo ? (
+                <p className="text-sm text-emerald-700">{createInfo}</p>
             ) : null}
 
-            <div className="bg-white border border-slate-200 rounded-lg shadow-sm overflow-x-auto">
-                <table className="min-w-full text-sm">
-                    <thead>
-                        <tr className="border-b border-slate-200 bg-slate-50 text-left">
-                            <th className="px-4 py-3 font-medium text-slate-700 w-10">
-                                {" "}
-                            </th>
-                            <th className="px-4 py-3 font-medium text-slate-700">
-                                Titre
-                            </th>
-                            <th className="px-4 py-3 font-medium text-slate-700">
-                                Jour (réf.)
-                            </th>
-                            <th className="px-4 py-3 font-medium text-slate-700">
-                                Créneau (réf.)
-                            </th>
-                            <th className="px-4 py-3 font-medium text-slate-700">
-                                Formateur
-                            </th>
-                            {admin ? (
-                                <th className="px-4 py-3 font-medium text-slate-700 w-40">
-                                    Actions
-                                </th>
-                            ) : null}
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {data?.map((f) => (
-                            <tr
-                                key={f.id}
-                                className="border-b border-slate-100 hover:bg-slate-50/80"
-                            >
-                                <td className="px-4 py-3 align-middle">
-                                    <span
-                                        className="inline-block h-6 w-6 rounded border border-slate-200"
-                                        style={{
-                                            backgroundColor:
-                                                f.color || "#3B82F6",
-                                        }}
-                                        title={f.color || ""}
-                                    />
-                                </td>
-                                <td className="px-4 py-3">
-                                    <div className="font-medium text-slate-900">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                {data?.map((f) => (
+                    <Card key={f.id} className="overflow-hidden">
+                        <CardHeader className="border-b pb-3">
+                            <div className="flex items-start gap-3">
+                                <span
+                                    className="mt-1 size-3.5 shrink-0 rounded-full ring-1 ring-black/10"
+                                    style={{
+                                        backgroundColor: f.color || "#3B82F6",
+                                    }}
+                                    aria-hidden
+                                />
+                                <div className="min-w-0 flex-1">
+                                    <CardTitle className="truncate text-base">
                                         {f.title}
-                                    </div>
+                                    </CardTitle>
                                     {f.description ? (
-                                        <div className="text-slate-500 text-xs mt-0.5 line-clamp-2">
+                                        <CardDescription className="mt-1 line-clamp-2">
                                             {f.description}
-                                        </div>
+                                        </CardDescription>
                                     ) : null}
-                                </td>
-                                <td className="px-4 py-3 text-slate-600">
-                                    {f.weekdayLabel ?? "—"}
-                                </td>
-                                <td className="px-4 py-3 text-slate-600 whitespace-nowrap">
-                                    {f.scheduleLabel ?? "—"}
-                                </td>
-                                <td className="px-4 py-3 text-slate-600">
-                                    {f.trainerName ?? "—"}
-                                </td>
-                                {admin ? (
-                                    <td className="px-4 py-3 space-x-2 whitespace-nowrap">
-                                        <button
-                                            type="button"
-                                            className="text-slate-700 hover:underline"
-                                            onClick={() => openEdit(f)}
-                                        >
-                                            Modifier
-                                        </button>
-                                        {!f.isArchived ? (
-                                            <button
-                                                type="button"
-                                                className="text-amber-800 hover:underline"
-                                                onClick={() => {
-                                                    if (
-                                                        confirm(
-                                                            "Archiver cette formation ?",
-                                                        )
-                                                    ) {
-                                                        archiveMut.mutate(f.id);
-                                                    }
-                                                }}
-                                            >
-                                                Archiver
-                                            </button>
-                                        ) : null}
-                                    </td>
+                                </div>
+                            </div>
+                        </CardHeader>
+                        <CardContent className="space-y-2 pt-4 text-sm">
+                            <div className="flex items-center gap-2 text-muted-foreground">
+                                <Users className="size-3.5 shrink-0" />
+                                <span className="truncate">
+                                    {f.trainerName || "Formateur non renseigné"}
+                                </span>
+                            </div>
+                            <p>
+                                <span className="text-muted-foreground">
+                                    Capacité :{" "}
+                                </span>
+                                <span className="font-medium">
+                                    {f.capacity != null
+                                        ? `${f.capacity} places`
+                                        : "Non limitée"}
+                                </span>
+                            </p>
+                            <p className="text-muted-foreground">
+                                {formatRecurrenceSummary(f)}
+                                {f.scheduleLabel &&
+                                f.scheduleLabel !== "—" ? (
+                                    <span className="block text-xs mt-0.5">
+                                        Créneau : {f.scheduleLabel}
+                                    </span>
                                 ) : null}
-                            </tr>
-                        ))}
-                    </tbody>
-                </table>
-                {!data?.length ? (
-                    <p className="p-6 text-slate-500">Aucune formation.</p>
-                ) : null}
+                            </p>
+                        </CardContent>
+                        {admin ? (
+                            <CardFooter className="justify-end gap-1 border-t">
+                                <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="icon-sm"
+                                    aria-label="Modifier"
+                                    onClick={() => openEdit(f)}
+                                >
+                                    <Pencil />
+                                </Button>
+                                {!f.isArchived ? (
+                                    <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="icon-sm"
+                                        className="text-destructive hover:text-destructive"
+                                        aria-label="Archiver"
+                                        onClick={() => {
+                                            if (
+                                                confirm(
+                                                    "Archiver cette formation ?",
+                                                )
+                                            ) {
+                                                archiveMut.mutate(f.id);
+                                            }
+                                        }}
+                                    >
+                                        <Archive />
+                                    </Button>
+                                ) : null}
+                            </CardFooter>
+                        ) : null}
+                    </Card>
+                ))}
             </div>
+
+            {!data?.length ? (
+                <p className="text-sm text-muted-foreground">
+                    Aucune formation.
+                </p>
+            ) : null}
+
+            <Dialog
+                open={dialogOpen}
+                onOpenChange={(open) => {
+                    if (!open) closeDialog();
+                }}
+            >
+                <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+                    <DialogHeader>
+                        <DialogTitle>
+                            {editing === "new"
+                                ? "Nouvelle formation"
+                                : "Modifier la formation"}
+                        </DialogTitle>
+                        <DialogDescription>
+                            Informations générales, puis récurrence pour générer
+                            les séances.
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    <form
+                        onSubmit={handleSubmit(onSubmit)}
+                        className="space-y-5"
+                    >
+                        <section className="space-y-3">
+                            <h3 className="text-sm font-medium">
+                                1. Informations générales
+                            </h3>
+                            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                                <div className="space-y-1.5 sm:col-span-2">
+                                    <Label htmlFor="title">Titre</Label>
+                                    <Input id="title" {...register("title")} />
+                                    <FieldError message={errors.title?.message} />
+                                </div>
+                                <div className="space-y-1.5 sm:col-span-2">
+                                    <Label htmlFor="description">
+                                        Description
+                                    </Label>
+                                    <Textarea
+                                        id="description"
+                                        rows={3}
+                                        {...register("description")}
+                                    />
+                                </div>
+                                <div className="space-y-1.5">
+                                    <Label htmlFor="trainerId">
+                                        Intervenant
+                                    </Label>
+                                    <select
+                                        id="trainerId"
+                                        className="flex h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm"
+                                        {...register("trainerId")}
+                                    >
+                                        <option value="">— Choisir —</option>
+                                        {trainers.map((t) => (
+                                            <option key={t.id} value={t.id}>
+                                                {t.firstName} {t.lastName} (
+                                                {t.role})
+                                            </option>
+                                        ))}
+                                    </select>
+                                    <FieldError
+                                        message={errors.trainerId?.message}
+                                    />
+                                </div>
+                                <div className="space-y-1.5">
+                                    <Label htmlFor="capacity">
+                                        Capacité max (optionnel)
+                                    </Label>
+                                    <Input
+                                        id="capacity"
+                                        type="number"
+                                        min={1}
+                                        {...register("capacity")}
+                                    />
+                                    <FieldError
+                                        message={errors.capacity?.message}
+                                    />
+                                </div>
+                                <div className="space-y-1.5 sm:col-span-2">
+                                    <Label htmlFor="color">
+                                        Couleur (calendrier)
+                                    </Label>
+                                    <div className="flex items-center gap-3">
+                                        <Input
+                                            id="color"
+                                            type="color"
+                                            className="h-9 w-14 cursor-pointer p-1"
+                                            {...register("color")}
+                                        />
+                                        <span className="font-mono text-xs text-muted-foreground">
+                                            {colorValue || "#3B82F6"}
+                                        </span>
+                                    </div>
+                                    <FieldError message={errors.color?.message} />
+                                </div>
+                            </div>
+                        </section>
+
+                        <Separator />
+
+                        <section className="space-y-3">
+                            <h3 className="text-sm font-medium">
+                                2. Génération automatique / Récurrence
+                            </h3>
+
+                            {editing === "new" ? (
+                                <div className="space-y-3 rounded-lg border bg-muted/30 p-3">
+                                    <label className="flex items-center gap-2 text-sm cursor-pointer">
+                                        <Controller
+                                            name="generateSeances"
+                                            control={control}
+                                            render={({ field }) => (
+                                                <Checkbox
+                                                    checked={field.value}
+                                                    onCheckedChange={(v) =>
+                                                        field.onChange(v === true)
+                                                    }
+                                                />
+                                            )}
+                                        />
+                                        Activer la génération automatique des
+                                        séances
+                                    </label>
+                                    {generateSeances ? (
+                                        <RecurrenceFields
+                                            register={register}
+                                            errors={errors}
+                                            activeSalles={activeSalles}
+                                        />
+                                    ) : null}
+                                </div>
+                            ) : (
+                                <div className="space-y-3 rounded-lg border border-amber-200 bg-amber-50/50 p-3">
+                                    <label className="flex items-center gap-2 text-sm cursor-pointer text-amber-950">
+                                        <Controller
+                                            name="editRegenerate"
+                                            control={control}
+                                            render={({ field }) => (
+                                                <Checkbox
+                                                    checked={field.value}
+                                                    onCheckedChange={(v) =>
+                                                        field.onChange(v === true)
+                                                    }
+                                                />
+                                            )}
+                                        />
+                                        Régénérer les séances (nouvelle
+                                        récurrence)
+                                    </label>
+                                    <p className="text-xs text-amber-900">
+                                        Toutes les séances et inscriptions
+                                        actuelles de cette formation seront
+                                        supprimées avant la création des nouveaux
+                                        créneaux.
+                                    </p>
+                                    {editRegenerate ? (
+                                        <RecurrenceFields
+                                            register={register}
+                                            errors={errors}
+                                            activeSalles={activeSalles}
+                                        />
+                                    ) : null}
+                                </div>
+                            )}
+                        </section>
+
+                        {createMut.isError ? (
+                            <p className="text-sm text-destructive">
+                                {apiErrorMessage(createMut.error)}
+                            </p>
+                        ) : null}
+                        {updateMut.isError ? (
+                            <p className="text-sm text-destructive">
+                                {apiErrorMessage(updateMut.error)}
+                            </p>
+                        ) : null}
+
+                        <DialogFooter className="px-0 sm:-mx-0 sm:mb-0">
+                            <Button
+                                type="button"
+                                variant="outline"
+                                onClick={closeDialog}
+                            >
+                                Annuler
+                            </Button>
+                            <Button
+                                type="submit"
+                                disabled={
+                                    createMut.isPending || updateMut.isPending
+                                }
+                            >
+                                Enregistrer
+                            </Button>
+                        </DialogFooter>
+                    </form>
+                </DialogContent>
+            </Dialog>
         </div>
     );
 }

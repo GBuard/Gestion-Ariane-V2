@@ -149,6 +149,9 @@ export async function listBySeance(req, res) {
     }
 
     const salle = await Salle.findById(seance.salleId).select("name").lean();
+    const trainer = await User.findById(formation.trainerId)
+        .select("firstName lastName")
+        .lean();
 
     const raw = await Inscription.find({
         formationId: seance.formationId,
@@ -195,10 +198,18 @@ export async function listBySeance(req, res) {
         };
     });
 
+    const maxCapacity =
+        seance.capacity != null ? seance.capacity : (formation.capacity ?? null);
+
     res.json({
         seance: seancePublic(seance),
         formationTitle: formation.title,
+        formationColor: formation.color || "#3B82F6",
         formationTrainerId: formation.trainerId.toString(),
+        trainerName: trainer
+            ? `${trainer.firstName} ${trainer.lastName}`
+            : "",
+        maxCapacity,
         salleName: salle?.name || "",
         inscriptions,
     });

@@ -3,10 +3,48 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
+import { Archive, Mail, Pencil, Phone, Plus, Search } from "lucide-react";
 import { useAuth } from "../context/AuthContext.jsx";
 import { isAdmin } from "../utils/roles.js";
 import { beneficiairesApi } from "../api/beneficiairesApi.js";
 import { usersApi } from "../api/usersApi.js";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import {
+    Card,
+    CardContent,
+    CardDescription,
+    CardHeader,
+    CardTitle,
+} from "@/components/ui/card";
+import {
+    Table,
+    TableBody,
+    TableCell,
+    TableHead,
+    TableHeader,
+    TableRow,
+} from "@/components/ui/table";
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from "@/components/ui/select";
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+} from "@/components/ui/dialog";
 
 const formSchema = z.object({
     firstName: z.string().min(1, "Requis"),
@@ -17,16 +55,26 @@ const formSchema = z.object({
     referentId: z.string().min(1, "Référent requis"),
 });
 
+function initials(firstName, lastName) {
+    const a = (firstName || "").trim().charAt(0);
+    const b = (lastName || "").trim().charAt(0);
+    return `${a}${b}`.toUpperCase() || "?";
+}
+
+function FieldError({ message }) {
+    if (!message) return null;
+    return <p className="text-xs text-destructive">{message}</p>;
+}
+
 export default function Beneficiaires() {
     const { user } = useAuth();
     const admin = isAdmin(user);
+    const canManage = admin || user?.role === "referent";
     const qc = useQueryClient();
     const [editing, setEditing] = useState(null);
     const [listQ, setListQ] = useState("");
     const [debouncedQ, setDebouncedQ] = useState("");
-    const [referentFilter, setReferentFilter] = useState("");
-    const [sortField, setSortField] = useState("lastName");
-    const [sortOrder, setSortOrder] = useState("asc");
+    const [referentFilter, setReferentFilter] = useState("all");
     const [listIncludeArchived, setListIncludeArchived] = useState(false);
 
     useEffect(() => {
@@ -36,21 +84,16 @@ export default function Beneficiaires() {
 
     const listParams = useMemo(() => {
         const p = {
-            sort: sortField,
-            order: sortOrder,
+            sort: "lastName",
+            order: "asc",
         };
         if (debouncedQ) p.q = debouncedQ;
-        if (admin && referentFilter) p.referentId = referentFilter;
+        if (admin && referentFilter && referentFilter !== "all") {
+            p.referentId = referentFilter;
+        }
         if (admin && listIncludeArchived) p.includeArchived = true;
         return p;
-    }, [
-        admin,
-        debouncedQ,
-        listIncludeArchived,
-        referentFilter,
-        sortField,
-        sortOrder,
-    ]);
+    }, [admin, debouncedQ, listIncludeArchived, referentFilter]);
 
     const { data, isLoading, isError } = useQuery({
         queryKey: ["beneficiaires", listParams],
@@ -149,13 +192,23 @@ export default function Beneficiaires() {
         });
     };
 
-    const submitCreate = async (body, force = false) => {
+    const closeDialog = () => {
+        setEditing(null);
+        reset();
+        createMut.reset();
+        updateMut.reset();
+    };
+
+    const submitCreate = async (body) => {
         try {
-            await createMut.mutateAsync({ ...body, force });
+            await createMut.mutateAsync(body);
         } catch (err) {
-            const data = err?.response?.data;
-            if (err?.response?.status === 409 && data?.code === "POSSIBLE_DUPLICATE") {
-                const names = (data.duplicates || [])
+            const resData = err?.response?.data;
+            if (
+                err?.response?.status === 409 &&
+                resData?.code === "POSSIBLE_DUPLICATE"
+            ) {
+                const names = (resData.duplicates || [])
                     .map((d) => `${d.firstName} ${d.lastName}`)
                     .join(", ");
                 const ok = confirm(
@@ -187,331 +240,360 @@ export default function Beneficiaires() {
     };
 
     if (isLoading) {
-        return <p className="text-slate-600">Chargement…</p>;
+        return <p className="text-muted-foreground">Chargement…</p>;
     }
     if (isError) {
         return (
-            <p className="text-red-600">
+            <p className="text-destructive">
                 Impossible de charger les bénéficiaires.
             </p>
         );
     }
 
+    const dialogOpen = Boolean(editing);
+
     return (
-        <div>
-            <div className="flex items-center justify-between gap-4 mb-6">
+        <div className="space-y-6">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                 <div>
-                    <h1 className="text-2xl font-semibold text-slate-900">
+                    <h1 className="text-2xl font-semibold tracking-tight">
                         Bénéficiaires
                     </h1>
-                    <p className="text-slate-600 text-sm mt-1">
-                        Personnes suivies par la structure.
+                    <p className="mt-1 text-sm text-muted-foreground">
+                        Trouvez et gérez rapidement les personnes accompagnées.
                     </p>
                 </div>
-                {admin || user?.role === "referent" ? (
-                    <button
-                        type="button"
-                        onClick={openCreate}
-                        className="rounded-md bg-slate-900 text-white text-sm font-medium px-4 py-2 hover:bg-slate-800"
-                    >
-                        Nouveau
-                    </button>
+                {canManage ? (
+                    <Button type="button" onClick={openCreate}>
+                        <Plus data-icon="inline-start" />
+                        Nouveau bénéficiaire
+                    </Button>
                 ) : null}
             </div>
 
-            <div className="mb-6 flex flex-col gap-3 md:flex-row md:flex-wrap md:items-end">
-                <div className="flex-1 min-w-[200px]">
-                    <label className="block text-xs font-medium text-slate-600 mb-1">
-                        Recherche (nom, prénom, email)
-                    </label>
-                    <input
-                        type="search"
-                        value={listQ}
-                        onChange={(e) => setListQ(e.target.value)}
-                        placeholder="Tapez pour filtrer…"
-                        className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                    />
-                </div>
-                {admin ? (
-                    <div className="w-full md:w-56">
-                        <label className="block text-xs font-medium text-slate-600 mb-1">
-                            Référent
-                        </label>
-                        <select
-                            value={referentFilter}
-                            onChange={(e) => setReferentFilter(e.target.value)}
-                            className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                        >
-                            <option value="">Tous</option>
-                            {referents.map((r) => (
-                                <option key={r.id} value={r.id}>
-                                    {r.firstName} {r.lastName}
-                                </option>
-                            ))}
-                        </select>
-                    </div>
-                ) : null}
-                <div className="w-full md:w-44">
-                    <label className="block text-xs font-medium text-slate-600 mb-1">
-                        Trier par
-                    </label>
-                    <select
-                        value={sortField}
-                        onChange={(e) => setSortField(e.target.value)}
-                        className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                    >
-                        <option value="lastName">Nom</option>
-                        <option value="firstName">Prénom</option>
-                        <option value="email">Email</option>
-                    </select>
-                </div>
-                <div className="w-full md:w-36">
-                    <label className="block text-xs font-medium text-slate-600 mb-1">
-                        Ordre
-                    </label>
-                    <select
-                        value={sortOrder}
-                        onChange={(e) => setSortOrder(e.target.value)}
-                        className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                    >
-                        <option value="asc">Croissant</option>
-                        <option value="desc">Décroissant</option>
-                    </select>
-                </div>
-                {admin ? (
-                    <div className="w-full md:w-auto flex items-end pb-0.5">
-                        <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
-                            <input
-                                type="checkbox"
-                                className="rounded border-slate-300"
-                                checked={listIncludeArchived}
-                                onChange={(e) =>
-                                    setListIncludeArchived(e.target.checked)
-                                }
-                            />
-                            Inclure archivés
-                        </label>
-                    </div>
-                ) : null}
-            </div>
-
-            {(admin || user?.role === "referent") && editing ? (
-                <form
-                    onSubmit={handleSubmit(onSubmit)}
-                    className="mb-8 bg-white border border-slate-200 rounded-lg p-5 shadow-sm space-y-4"
-                >
-                    <h2 className="font-medium text-slate-900">
-                        {editing === "new"
-                            ? "Nouveau bénéficiaire"
-                            : "Modifier le bénéficiaire"}
-                    </h2>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                            <label className="text-sm font-medium text-slate-700">
-                                Prénom
-                            </label>
-                            <input
-                                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                                {...register("firstName")}
-                            />
-                            {errors.firstName ? (
-                                <p className="text-sm text-red-600 mt-1">
-                                    {errors.firstName.message}
-                                </p>
-                            ) : null}
-                        </div>
-                        <div>
-                            <label className="text-sm font-medium text-slate-700">
-                                Nom
-                            </label>
-                            <input
-                                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                                {...register("lastName")}
-                            />
-                            {errors.lastName ? (
-                                <p className="text-sm text-red-600 mt-1">
-                                    {errors.lastName.message}
-                                </p>
-                            ) : null}
-                        </div>
-                        <div>
-                            <label className="text-sm font-medium text-slate-700">
-                                Email
-                            </label>
-                            <input
-                                type="email"
-                                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                                {...register("email")}
-                            />
-                        </div>
-                        <div>
-                            <label className="text-sm font-medium text-slate-700">
-                                Téléphone
-                            </label>
-                            <input
-                                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                                {...register("phone")}
+            <Card>
+                <CardHeader className="border-b pb-4">
+                    <CardTitle className="text-base">Filtres</CardTitle>
+                    <CardDescription>
+                        Recherche multi-critères (nom, prénom, email)
+                        {admin ? " et filtre par référent." : "."}
+                    </CardDescription>
+                </CardHeader>
+                <CardContent className="pt-4">
+                    <div className="flex flex-col gap-3 lg:flex-row lg:flex-wrap lg:items-end">
+                        <div className="relative min-w-[220px] flex-1">
+                            <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
+                            <Input
+                                type="search"
+                                value={listQ}
+                                onChange={(e) => setListQ(e.target.value)}
+                                placeholder="Nom, prénom ou email…"
+                                className="pl-8"
                             />
                         </div>
                         {admin ? (
-                            <div className="md:col-span-2">
-                                <label className="text-sm font-medium text-slate-700">
+                            <div className="w-full lg:w-56">
+                                <Label className="mb-1.5 block text-xs text-muted-foreground">
                                     Référent
-                                </label>
-                                <select
-                                    className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                                    {...register("referentId")}
+                                </Label>
+                                <Select
+                                    value={referentFilter}
+                                    onValueChange={setReferentFilter}
                                 >
-                                    <option value="">— Choisir —</option>
-                                    {referents.map((r) => (
-                                        <option key={r.id} value={r.id}>
-                                            {r.firstName} {r.lastName} ({r.email})
-                                        </option>
-                                    ))}
-                                </select>
-                                {errors.referentId ? (
-                                    <p className="text-sm text-red-600 mt-1">
-                                        {errors.referentId.message}
-                                    </p>
-                                ) : null}
+                                    <SelectTrigger className="w-full">
+                                        <SelectValue placeholder="Tous" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="all">Tous</SelectItem>
+                                        {referents.map((r) => (
+                                            <SelectItem key={r.id} value={r.id}>
+                                                {r.firstName} {r.lastName}
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
                             </div>
-                        ) : (
-                            <input type="hidden" {...register("referentId")} />
-                        )}
-                        <div className="md:col-span-2">
-                            <label className="text-sm font-medium text-slate-700">
-                                Notes
+                        ) : null}
+                        {admin ? (
+                            <label className="flex items-center gap-2 pb-1 text-sm cursor-pointer">
+                                <Checkbox
+                                    checked={listIncludeArchived}
+                                    onCheckedChange={(v) =>
+                                        setListIncludeArchived(v === true)
+                                    }
+                                />
+                                Inclure les archivés
                             </label>
-                            <textarea
-                                rows={3}
-                                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                                {...register("notes")}
-                            />
-                        </div>
+                        ) : null}
                     </div>
-                    <div className="flex gap-2">
-                        <button
-                            type="submit"
-                            className="rounded-md bg-slate-900 text-white text-sm px-4 py-2"
-                            disabled={createMut.isPending || updateMut.isPending}
-                        >
-                            Enregistrer
-                        </button>
-                        <button
-                            type="button"
-                            className="rounded-md border border-slate-300 text-sm px-4 py-2"
-                            onClick={() => {
-                                setEditing(null);
-                                reset();
-                            }}
-                        >
-                            Annuler
-                        </button>
-                    </div>
-                    {(createMut.isError || updateMut.isError) && (
-                        <p className="text-sm text-red-600">
-                            Erreur à l’enregistrement. Vérifiez les données.
-                        </p>
-                    )}
-                </form>
-            ) : null}
+                </CardContent>
+            </Card>
 
-            <div className="bg-white border border-slate-200 rounded-lg shadow-sm overflow-x-auto">
-                <table className="min-w-full text-sm">
-                    <thead>
-                        <tr className="border-b border-slate-200 bg-slate-50 text-left">
-                            <th className="px-4 py-3 font-medium text-slate-700">
-                                Nom
-                            </th>
-                            {admin ? (
-                                <th className="px-4 py-3 font-medium text-slate-700">
-                                    Référent
-                                </th>
-                            ) : null}
-                            <th className="px-4 py-3 font-medium text-slate-700">
-                                Email
-                            </th>
-                            <th className="px-4 py-3 font-medium text-slate-700">
-                                Tél.
-                            </th>
-                            <th className="px-4 py-3 font-medium text-slate-700">
-                                Statut
-                            </th>
-                            {admin ? (
-                                <th className="px-4 py-3 font-medium text-slate-700 w-40">
-                                    Actions
-                                </th>
-                            ) : null}
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {data?.map((b) => (
-                            <tr
-                                key={b.id}
-                                className="border-b border-slate-100 hover:bg-slate-50/80"
-                            >
-                                <td className="px-4 py-3">
-                                    {b.firstName} {b.lastName}
-                                </td>
+            <Card className="py-0">
+                <CardContent className="px-0">
+                    <Table>
+                        <TableHeader>
+                            <TableRow>
+                                <TableHead className="pl-4">
+                                    Bénéficiaire
+                                </TableHead>
+                                <TableHead>Coordonnées</TableHead>
                                 {admin ? (
-                                    <td className="px-4 py-3 text-slate-600">
-                                        {referentNameById.get(b.referentId) ||
-                                            "—"}
-                                    </td>
+                                    <TableHead>Référent</TableHead>
                                 ) : null}
-                                <td className="px-4 py-3 text-slate-600">
-                                    {b.email || "—"}
-                                </td>
-                                <td className="px-4 py-3 text-slate-600">
-                                    {b.phone || "—"}
-                                </td>
-                                <td className="px-4 py-3">
-                                    {b.isArchived ? (
-                                        <span className="text-amber-700">
-                                            Archivé
-                                        </span>
-                                    ) : (
-                                        <span className="text-emerald-700">
-                                            Actif
-                                        </span>
-                                    )}
-                                </td>
+                                <TableHead>Statut</TableHead>
                                 {admin ? (
-                                    <td className="px-4 py-3 space-x-2 whitespace-nowrap">
-                                        <button
-                                            type="button"
-                                            className="text-slate-700 hover:underline"
-                                            onClick={() => openEdit(b)}
-                                        >
-                                            Modifier
-                                        </button>
-                                        {!b.isArchived ? (
-                                            <button
-                                                type="button"
-                                                className="text-red-700 hover:underline"
-                                                onClick={() => {
-                                                    if (
-                                                        confirm(
-                                                            "Archiver ce bénéficiaire ?",
-                                                        )
-                                                    ) {
-                                                        archiveMut.mutate(b.id);
-                                                    }
-                                                }}
-                                            >
-                                                Archiver
-                                            </button>
+                                    <TableHead className="w-24 pr-4 text-right">
+                                        Actions
+                                    </TableHead>
+                                ) : null}
+                            </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                            {data?.map((b) => (
+                                    <TableRow key={b.id}>
+                                        <TableCell className="pl-4">
+                                            <div className="flex items-center gap-3">
+                                                <Avatar size="sm">
+                                                    <AvatarFallback>
+                                                        {initials(
+                                                            b.firstName,
+                                                            b.lastName,
+                                                        )}
+                                                    </AvatarFallback>
+                                                </Avatar>
+                                                <div className="min-w-0">
+                                                    <div className="truncate font-medium">
+                                                        {b.firstName}{" "}
+                                                        {b.lastName}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </TableCell>
+                                        <TableCell className="whitespace-normal">
+                                            <div className="space-y-0.5 text-sm text-muted-foreground">
+                                                {b.email ? (
+                                                    <div className="flex items-center gap-1.5">
+                                                        <Mail className="size-3.5 shrink-0" />
+                                                        <span className="truncate">
+                                                            {b.email}
+                                                        </span>
+                                                    </div>
+                                                ) : null}
+                                                {b.phone ? (
+                                                    <div className="flex items-center gap-1.5">
+                                                        <Phone className="size-3.5 shrink-0" />
+                                                        <span>{b.phone}</span>
+                                                    </div>
+                                                ) : null}
+                                                {!b.email && !b.phone ? (
+                                                    <span>—</span>
+                                                ) : null}
+                                            </div>
+                                        </TableCell>
+                                        {admin ? (
+                                            <TableCell>
+                                                <Badge
+                                                    variant="secondary"
+                                                    className="font-normal"
+                                                >
+                                                    {referentNameById.get(
+                                                        b.referentId,
+                                                    ) || "—"}
+                                                </Badge>
+                                            </TableCell>
                                         ) : null}
-                                    </td>
-                                ) : null}
-                            </tr>
-                        ))}
-                    </tbody>
-                </table>
-                {!data?.length ? (
-                    <p className="p-6 text-slate-500">Aucun bénéficiaire.</p>
-                ) : null}
-            </div>
+                                        <TableCell>
+                                            {b.isArchived ? (
+                                                <Badge variant="outline">
+                                                    Archivé
+                                                </Badge>
+                                            ) : (
+                                                <Badge variant="default">
+                                                    Actif
+                                                </Badge>
+                                            )}
+                                        </TableCell>
+                                        {admin ? (
+                                            <TableCell className="pr-4 text-right">
+                                                <div className="inline-flex items-center gap-0.5">
+                                                    <Button
+                                                        type="button"
+                                                        variant="ghost"
+                                                        size="icon-sm"
+                                                        aria-label="Modifier"
+                                                        onClick={() =>
+                                                            openEdit(b)
+                                                        }
+                                                    >
+                                                        <Pencil />
+                                                    </Button>
+                                                    {!b.isArchived ? (
+                                                        <Button
+                                                            type="button"
+                                                            variant="ghost"
+                                                            size="icon-sm"
+                                                            className="text-destructive hover:text-destructive"
+                                                            aria-label="Archiver"
+                                                            onClick={() => {
+                                                                if (
+                                                                    confirm(
+                                                                        "Archiver ce bénéficiaire ?",
+                                                                    )
+                                                                ) {
+                                                                    archiveMut.mutate(
+                                                                        b.id,
+                                                                    );
+                                                                }
+                                                            }}
+                                                        >
+                                                            <Archive />
+                                                        </Button>
+                                                    ) : null}
+                                                </div>
+                                            </TableCell>
+                                        ) : null}
+                                    </TableRow>
+                            ))}
+                        </TableBody>
+                    </Table>
+                    {!data?.length ? (
+                        <p className="p-6 text-sm text-muted-foreground">
+                            Aucun bénéficiaire pour ces filtres.
+                        </p>
+                    ) : null}
+                </CardContent>
+            </Card>
+
+            <Dialog
+                open={dialogOpen}
+                onOpenChange={(open) => {
+                    if (!open) closeDialog();
+                }}
+            >
+                <DialogContent className="sm:max-w-lg">
+                    <DialogHeader>
+                        <DialogTitle>
+                            {editing === "new"
+                                ? "Nouveau bénéficiaire"
+                                : "Modifier le bénéficiaire"}
+                        </DialogTitle>
+                        <DialogDescription>
+                            Renseignez l’identité et, si besoin, les
+                            coordonnées de contact.
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    <form
+                        onSubmit={handleSubmit(onSubmit)}
+                        className="space-y-4"
+                    >
+                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                            <div className="space-y-1.5">
+                                <Label htmlFor="benef-firstName">Prénom</Label>
+                                <Input
+                                    id="benef-firstName"
+                                    autoComplete="given-name"
+                                    {...register("firstName")}
+                                />
+                                <FieldError
+                                    message={errors.firstName?.message}
+                                />
+                            </div>
+                            <div className="space-y-1.5">
+                                <Label htmlFor="benef-lastName">Nom</Label>
+                                <Input
+                                    id="benef-lastName"
+                                    autoComplete="family-name"
+                                    {...register("lastName")}
+                                />
+                                <FieldError
+                                    message={errors.lastName?.message}
+                                />
+                            </div>
+                            <div className="space-y-1.5">
+                                <Label htmlFor="benef-email">Email</Label>
+                                <Input
+                                    id="benef-email"
+                                    type="email"
+                                    autoComplete="email"
+                                    {...register("email")}
+                                />
+                                <FieldError message={errors.email?.message} />
+                            </div>
+                            <div className="space-y-1.5">
+                                <Label htmlFor="benef-phone">Téléphone</Label>
+                                <Input
+                                    id="benef-phone"
+                                    autoComplete="tel"
+                                    {...register("phone")}
+                                />
+                            </div>
+                            {admin ? (
+                                <div className="space-y-1.5 sm:col-span-2">
+                                    <Label htmlFor="benef-referent">
+                                        Référent
+                                    </Label>
+                                    <select
+                                        id="benef-referent"
+                                        className="flex h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm"
+                                        {...register("referentId")}
+                                    >
+                                        <option value="">— Choisir —</option>
+                                        {referents.map((r) => (
+                                            <option key={r.id} value={r.id}>
+                                                {r.firstName} {r.lastName}
+                                            </option>
+                                        ))}
+                                    </select>
+                                    <FieldError
+                                        message={errors.referentId?.message}
+                                    />
+                                </div>
+                            ) : (
+                                <input
+                                    type="hidden"
+                                    {...register("referentId")}
+                                />
+                            )}
+                            <div className="space-y-1.5 sm:col-span-2">
+                                <Label htmlFor="benef-notes">Notes</Label>
+                                <Textarea
+                                    id="benef-notes"
+                                    rows={3}
+                                    {...register("notes")}
+                                />
+                            </div>
+                        </div>
+
+                        {(createMut.isError || updateMut.isError) && (
+                            <p className="text-sm text-destructive">
+                                {createMut.error?.response?.data?.message ||
+                                    updateMut.error?.response?.data?.message ||
+                                    "Erreur à l’enregistrement. Vérifiez les données."}
+                            </p>
+                        )}
+
+                        <DialogFooter className="px-0 sm:-mx-0 sm:mb-0">
+                            <Button
+                                type="button"
+                                variant="outline"
+                                onClick={closeDialog}
+                            >
+                                Annuler
+                            </Button>
+                            <Button
+                                type="submit"
+                                disabled={
+                                    createMut.isPending || updateMut.isPending
+                                }
+                            >
+                                Enregistrer
+                            </Button>
+                        </DialogFooter>
+                    </form>
+                </DialogContent>
+            </Dialog>
         </div>
     );
 }
